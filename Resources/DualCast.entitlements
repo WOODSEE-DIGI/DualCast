@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+		NDI's mDNS discovery + raw sockets are not sandbox-compatible without
+		significant restrictions, so DualCast ships unsandboxed (standard for
+		NDI tools like NDI Studio Monitor). Hardened Runtime stays enabled.
+		disable-library-validation lets the app load the NewTek-signed
+		libndi.dylib when it hasn't been re-signed on embed (e.g. Debug).
+	-->
+	<key>com.apple.security.cs.disable-library-validation</key>
+	<true/>
+</dict>
+</plist>

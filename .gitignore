@@ -1,0 +1,17 @@
+# macOS
+.DS_Store
+
+# Xcode / build artifacts
+DerivedData/
+build/
+*.xcuserstate
+xcuserdata/
+*.moved-aside
+*.xccheckout
+
+# Generated project (regenerate with `xcodegen generate`)
+DualCast.xcodeproj/
+
+# SwiftPM
+.swiftpm/
+.build/

@@ -1,0 +1,55 @@
+# DualCast — dual-display NDI screen capture for streaming
+# Regenerate the Xcode project after editing:  xcodegen generate
+
+name: DualCast
+
+options:
+  bundleIdPrefix: com.woodseedigi
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    ENABLE_HARDENED_RUNTIME: YES
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: 3BMZ2ULZ54
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+
+targets:
+  DualCast:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources
+      - path: Vendor
+        buildPhase: none
+    info:
+      path: Resources/Info.plist
+      properties:
+        CFBundleName: DualCast
+        CFBundleDisplayName: DualCast
+        CFBundlePackageType: APPL
+        NSPrincipalClass: NSApplication
+        LSMinimumSystemVersion: "14.0"
+        NSHumanReadableCopyright: "woodsee"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.woodseedigi.DualCast
+        PRODUCT_NAME: DualCast
+        CODE_SIGN_ENTITLEMENTS: "$(SRCROOT)/Resources/DualCast.entitlements"
+        SWIFT_OBJC_BRIDGING_HEADER: "$(SRCROOT)/Vendor/NDI/DualCast-Bridging-Header.h"
+        HEADER_SEARCH_PATHS: "$(SRCROOT)/Vendor/NDI/include"
+        LIBRARY_SEARCH_PATHS:
+          - "$(inherited)"
+          - "$(SRCROOT)/Vendor/NDI"
+        LD_RUNPATH_SEARCH_PATHS:
+          - "$(inherited)"
+          - "@executable_path/../Frameworks"
+    dependencies:
+      - framework: Vendor/NDI/libndi.dylib
+        embed: true
+        codeSign: true
