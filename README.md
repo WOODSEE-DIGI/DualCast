@@ -8,6 +8,8 @@ Dual-display NDI screen capture for macOS — send two displays as separate NDI
 sources over your network. Works with any NDI-capable receiver (Ecamm Live,
 OBS, NDI Studio Monitor, etc.) with no extra software required.
 
+[**Download DualCast 0.4.0**](https://github.com/WOODSEE-DIGI/DualCast/releases/download/v0.4.0/DualCast-0.4.0.dmg) · [License](LICENSE) · [Source on GitHub](https://github.com/WOODSEE-DIGI/DualCast)
+
 <p align="center">
   <img src="images/dualcast-streaming.png" alt="DualCast capturing two displays with live stats" width="720">
 </p>
