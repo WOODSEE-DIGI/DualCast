@@ -71,10 +71,23 @@ final class DisplayCapture: NSObject, @unchecked Sendable {
     private lazy var previewContext = CIContext()
 
     // MARK: Audio-queue-confined state (only touch on `audioQueue`)
-    private var deinterleaveBuffers: [UnsafeMutablePointer<Float>] = []
-    private var deinterleaveCapacity: Int = 0
+    /// ONE contiguous planar buffer ([ch0][ch1]...) — NDI FLTP layout.
+    private var audioPlanarBuffer: UnsafeMutablePointer<Float>?
+    private var audioPlanarCapacity: Int = 0
     private var lastAudioLevelDate: Date = .distantPast
     private var warnedAudioFormat = false
+    #if DEBUG
+    private var audioTXCount = 0
+    private func audioDebugLog(_ message: String) {
+        let line = "\(Date()): TX \(message)\n"
+        guard let data = line.data(using: .utf8) else { return }
+        if let handle = FileHandle(forWritingAtPath: "/tmp/dc-audio-tx.log") {
+            handle.seekToEndOfFile(); handle.write(data); try? handle.close()
+        } else {
+            try? data.write(to: URL(fileURLWithPath: "/tmp/dc-audio-tx.log"))
+        }
+    }
+    #endif
 
     // MARK: Callbacks (always invoked on the main actor)
     var onStats: (@MainActor (CaptureStats) -> Void)?
@@ -287,71 +300,83 @@ final class DisplayCapture: NSObject, @unchecked Sendable {
         let channelCount = max(Int(asbd.mChannelsPerFrame), 1)
         let sampleRate = Int(asbd.mSampleRate)
         let isNonInterleaved = (asbd.mFormatFlags & kAudioFormatFlagIsNonInterleaved) != 0
+        #if DEBUG
+        if audioTXCount == 0 {
+            audioDebugLog("ASBD ch=\(channelCount) rate=\(sampleRate) nonInterleaved=\(isNonInterleaved) ablBuffers=\(abl.count) b0Bytes=\(abl.first?.mDataByteSize ?? 0)")
+        }
+        #endif
 
-        var channelPointers: [UnsafeMutablePointer<Float>?] = []
-        var sampleCount = 0
-        var channelStride = 0
+        // NDI FLTP requires ONE contiguous planar buffer ([ch0][ch1]...).
+        // Build it from whatever SCK delivered (planar or interleaved).
+        let sampleCount: Int
+        if isNonInterleaved || channelCount == 1 || abl.count > 1 {
+            sampleCount = abl.first.map { Int($0.mDataByteSize) / MemoryLayout<Float>.size } ?? 0
+        } else {
+            sampleCount = abl.first.map {
+                Int($0.mDataByteSize) / (MemoryLayout<Float>.size * channelCount)
+            } ?? 0
+        }
+        guard sampleCount > 0 else { return }
+
+        ensureAudioPlanarCapacity(floats: sampleCount * channelCount)
+        guard let planar = audioPlanarBuffer else { return }
 
         if isNonInterleaved || channelCount == 1 || abl.count > 1 {
-            // Planar: one AudioBuffer per channel — direct pointer mapping.
-            for index in 0..<min(channelCount, abl.count) {
-                let buffer = abl[index]
-                channelPointers.append(buffer.mData?.assumingMemoryBound(to: Float.self))
-                if index == 0 {
-                    sampleCount = Int(buffer.mDataByteSize) / MemoryLayout<Float>.size
-                    channelStride = Int(buffer.mDataByteSize)
-                }
+            // Planar source: copy each channel's AudioBuffer into place.
+            if abl.count < channelCount {
+                memset(planar, 0, sampleCount * channelCount * MemoryLayout<Float>.size)
+            }
+            for channel in 0..<min(channelCount, abl.count) {
+                guard let source = abl[channel].mData else { continue }
+                memcpy(
+                    planar.advanced(by: channel * sampleCount),
+                    source,
+                    sampleCount * MemoryLayout<Float>.size
+                )
             }
         } else {
-            // Interleaved fallback: deinterleave into preallocated planar buffers.
-            guard let buffer = abl.first, let data = buffer.mData else { return }
-            let frames = Int(buffer.mDataByteSize) / (MemoryLayout<Float>.size * channelCount)
-            guard frames > 0 else { return }
-            ensureDeinterleaveCapacity(frames: frames, channels: channelCount)
-
-            let interleaved = data.assumingMemoryBound(to: Float.self)
-            for frame in 0..<frames {
+            // Interleaved source: deinterleave into planar layout.
+            let interleaved = abl.first!.mData!.assumingMemoryBound(to: Float.self)
+            for frame in 0..<sampleCount {
                 for channel in 0..<channelCount {
-                    deinterleaveBuffers[channel][frame] = interleaved[frame * channelCount + channel]
+                    planar[channel * sampleCount + frame] = interleaved[frame * channelCount + channel]
                 }
             }
-            channelPointers = deinterleaveBuffers.map { Optional($0) }
-            sampleCount = frames
-            channelStride = frames * MemoryLayout<Float>.size
         }
 
-        guard sampleCount > 0, !channelPointers.isEmpty else { return }
-
-        publishAudioLevel(channels: channelPointers, sampleCount: sampleCount)
+        publishAudioLevel(planar: planar, sampleCount: sampleCount, channelCount: channelCount)
         sender.send(
-            fltpChannels: channelPointers,
+            fltpPlanarData: UnsafePointer(planar),
+            channelCount: channelCount,
             sampleRate: sampleRate,
-            sampleCount: sampleCount,
-            channelStrideBytes: channelStride
+            sampleCount: sampleCount
         )
+        #if DEBUG
+        audioTXCount += 1
+        if audioTXCount % 100 == 1 {
+            audioDebugLog("frame #\(audioTXCount) samples=\(sampleCount) ch=\(channelCount) rate=\(sampleRate) peakSent")
+        }
+        #endif
     }
 
-    private func ensureDeinterleaveCapacity(frames: Int, channels: Int) {
-        guard deinterleaveBuffers.count != channels || frames > deinterleaveCapacity else { return }
-        deinterleaveBuffers.forEach { $0.deallocate() }
-        let capacity = max(frames * 2, 4800)
-        deinterleaveBuffers = (0..<channels).map { _ in
-            UnsafeMutablePointer<Float>.allocate(capacity: capacity)
-        }
-        deinterleaveCapacity = capacity
+    private func ensureAudioPlanarCapacity(floats: Int) {
+        guard floats > audioPlanarCapacity else { return }
+        audioPlanarBuffer?.deallocate()
+        let capacity = max(floats * 2, 9600)
+        audioPlanarBuffer = UnsafeMutablePointer<Float>.allocate(capacity: capacity)
+        audioPlanarCapacity = capacity
     }
 
     /// Peak level across channels, published to the UI at ~10 Hz.
-    private func publishAudioLevel(channels: [UnsafeMutablePointer<Float>?], sampleCount: Int) {
+    private func publishAudioLevel(planar: UnsafePointer<Float>, sampleCount: Int, channelCount: Int) {
         let now = Date()
         guard now.timeIntervalSince(lastAudioLevelDate) >= Self.audioLevelInterval else { return }
         lastAudioLevelDate = now
 
         var peak: Float = 0
-        for channel in channels {
-            guard let pointer = channel else { continue }
+        for channel in 0..<channelCount {
             var channelPeak: Float = 0
-            vDSP_maxmgv(pointer, 1, &channelPeak, vDSP_Length(sampleCount))
+            vDSP_maxmgv(planar.advanced(by: channel * sampleCount), 1, &channelPeak, vDSP_Length(sampleCount))
             peak = max(peak, channelPeak)
         }
 

@@ -107,22 +107,19 @@ final class NDISender: @unchecked Sendable {
         NDIlib_send_send_audio_v3(instance, frame)
     }
 
-    /// Submit one chunk of planar Float32 audio (one pointer per channel).
-    /// Per NDI docs, audio and video may be sent from separate threads.
-    /// The channel buffers must remain valid for the duration of the call.
-    func send(fltpChannels channels: [UnsafeMutablePointer<Float>?],
-              sampleRate: Int, sampleCount: Int, channelStrideBytes: Int) {
-        var mutableChannels = channels
-        mutableChannels.withUnsafeMutableBufferPointer { buffer in
-            ndilib_send_audio_fltp(
-                instance,
-                buffer.baseAddress,
-                Int32(channels.count),
-                Int32(sampleRate),
-                Int32(sampleCount),
-                Int32(channelStrideBytes)
-            )
-        }
+    /// Submit one chunk of planar Float32 audio: ONE contiguous buffer with
+    /// all channels back-to-back ([ch0 samples][ch1 samples]...), as NDI's
+    /// FLTP layout requires. Per NDI docs, audio and video may be sent from
+    /// separate threads. The buffer must remain valid for the call duration.
+    func send(fltpPlanarData data: UnsafePointer<Float>, channelCount: Int,
+              sampleRate: Int, sampleCount: Int) {
+        ndilib_send_audio_fltp(
+            instance,
+            data,
+            Int32(channelCount),
+            Int32(sampleRate),
+            Int32(sampleCount)
+        )
     }
 
     /// Number of receivers currently watching this source (non-blocking).

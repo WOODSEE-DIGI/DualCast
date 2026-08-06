@@ -180,9 +180,13 @@ typedef struct NDIlib_metadata_frame_t {
 
 /// Audio frame descriptor (v3), 64 bytes. Layout verified against the
 /// official SDK docs (sending-audio-frames example sets data_size_in_bytes
-/// AND p_metadata as separate fields). For FLTP, p_data points to an array
-/// of float* (one per channel) and channel_stride_in_bytes is each channel
-/// buffer's byte count.
+/// AND p_metadata as separate fields).
+///
+/// FLTP data layout (CRITICAL — getting this wrong means silent audio):
+/// p_data points to ONE CONTIGUOUS planar float32 buffer holding all
+/// channels back-to-back: [ch0 samples][ch1 samples]...
+/// channel_stride_in_bytes = byte count of ONE channel = no_samples*4.
+/// It is NOT a pointer-to-an-array-of-channel-pointers.
 typedef struct NDIlib_audio_frame_v3_t {
     int sample_rate;
     int no_channels;
@@ -191,7 +195,7 @@ typedef struct NDIlib_audio_frame_v3_t {
     int FourCC;
     uint8_t *p_data;
     union {
-        int channel_stride_in_bytes;  // FLTP (planar float32)
+        int channel_stride_in_bytes;  // FLTP: bytes per channel
         int data_size_in_bytes;       // compressed audio (same ABI slot)
     };
     const char *p_metadata;
@@ -292,23 +296,21 @@ static inline void ndilib_audio_frame_free(NDIlib_audio_frame_v3_t *f) {
 }
 
 /// Submit one FLTP (planar float32) audio chunk with synthesised timecode.
-/// channel_data is an array of no_channels pointers, one per channel;
-/// channel_stride_in_bytes is the byte count of each channel buffer
-/// (no_samples * sizeof(float)).
+/// planar_data is ONE contiguous buffer with all channels back-to-back
+/// ([ch0][ch1]...); NDI locates channel N at planar_data + N * no_samples.
 static inline void ndilib_send_audio_fltp(NDIlib_send_instance_t sender,
-                                          float **channel_data,
+                                          const float *planar_data,
                                           int no_channels,
                                           int sample_rate,
-                                          int no_samples,
-                                          int channel_stride_in_bytes) {
+                                          int no_samples) {
     NDIlib_audio_frame_v3_t frame = {0};
     frame.sample_rate = sample_rate;
     frame.no_channels = no_channels;
     frame.no_samples = no_samples;
     frame.timecode = NDILIB_SEND_TIMECODE_SYNTHESIZE;
     frame.FourCC = NDILIB_FOURCC_AUDIO_FLTP;
-    frame.p_data = (uint8_t *)channel_data;
-    frame.channel_stride_in_bytes = channel_stride_in_bytes;
+    frame.p_data = (uint8_t *)planar_data;
+    frame.channel_stride_in_bytes = no_samples * (int)sizeof(float);
     NDIlib_send_send_audio_v3(sender, &frame);
 }
 
