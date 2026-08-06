@@ -34,7 +34,12 @@ struct ContentView: View {
             ForEach($manager.displays) { $display in
                 DisplayRowView(
                     display: $display,
-                    preview: manager.previews[display.id]
+                    preview: manager.previews[display.id],
+                    carriesAudio: manager.audioDisplayID == display.id,
+                    audioLevel: manager.audioLevels[display.id] ?? 0,
+                    onToggleAudio: {
+                        Task { await manager.setAudioDisplay(display.id) }
+                    }
                 ) {
                     Task {
                         if display.isStreaming {
@@ -154,6 +159,9 @@ struct ContentView: View {
 private struct DisplayRowView: View {
     @Binding var display: StreamManager.DisplayItem
     let preview: CGImage?
+    let carriesAudio: Bool
+    let audioLevel: Float
+    let onToggleAudio: () -> Void
     let onToggleStreaming: () -> Void
 
     var body: some View {
@@ -167,6 +175,15 @@ private struct DisplayRowView: View {
                     }
                     .toggleStyle(.checkbox)
                     .disabled(display.isStreaming)
+
+                    Button(action: onToggleAudio) {
+                        Image(systemName: carriesAudio ? "speaker.wave.2.fill" : "speaker.slash")
+                            .foregroundStyle(carriesAudio ? Color.accentColor : Color.secondary)
+                    }
+                    .buttonStyle(.borderless)
+                    .help(carriesAudio
+                          ? "System audio rides this stream — tap to move it off"
+                          : "Attach system audio to this stream")
 
                     Spacer()
 
@@ -213,6 +230,26 @@ private struct DisplayRowView: View {
                         .disabled(!display.isEnabled && !display.isStreaming)
                 }
                 .font(.callout)
+
+                if carriesAudio {
+                    HStack(spacing: 6) {
+                        Image(systemName: "waveform")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        GeometryReader { geometry in
+                            ZStack(alignment: .leading) {
+                                Capsule().fill(.quaternary)
+                                Capsule()
+                                    .fill(audioLevel > 0.8 ? Color.red : (audioLevel > 0.5 ? Color.yellow : Color.green))
+                                    .frame(width: max(2, geometry.size.width * CGFloat(min(audioLevel, 1))))
+                            }
+                        }
+                        .frame(height: 6)
+                        Text("48 kHz stereo")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
 
                 if let error = display.error {
                     Label(error, systemImage: "exclamationmark.triangle")

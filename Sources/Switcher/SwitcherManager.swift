@@ -44,6 +44,7 @@ final class SwitcherManager {
     private(set) var outputReceivers = 0
     private(set) var outputOnProgram = false
     private(set) var outputOnPreview = false
+    private(set) var slotAudioAlive: [Int: Bool] = [:]
     private(set) var ndiAvailable = false
     private(set) var ndiVersion = ""
     var errorMessage: String?
@@ -237,11 +238,18 @@ final class SwitcherManager {
             while !Task.isCancelled {
                 guard let self, let engine = self.engine else { return }
                 let status = await Task.detached {
-                    (engine.outputConnectionCount, engine.outputTally)
+                    (
+                        engine.outputConnectionCount,
+                        engine.outputTally,
+                        engine.audioAlive(for: 0),
+                        engine.audioAlive(for: 1)
+                    )
                 }.value
                 self.outputReceivers = status.0
                 self.outputOnProgram = status.1.onProgram
                 self.outputOnPreview = status.1.onPreview
+                self.slotAudioAlive[0] = status.2
+                self.slotAudioAlive[1] = status.3
                 try? await Task.sleep(for: .seconds(2))
             }
         }

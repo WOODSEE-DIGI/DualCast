@@ -7,6 +7,7 @@
 //  NDI send calls are strictly single-threaded per sender instance.
 //
 
+import Accelerate
 import CoreGraphics
 import CoreImage
 import CoreMedia
@@ -24,6 +25,7 @@ struct CaptureStats: Sendable {
     var connections: Int = 0
     var onProgram: Bool = false
     var onPreview: Bool = false
+    var hasAudio: Bool = false
 }
 
 final class DisplayCapture: NSObject, @unchecked Sendable {
@@ -33,6 +35,10 @@ final class DisplayCapture: NSObject, @unchecked Sendable {
         var maxOutputHeight: Int = 1440
         var framesPerSecond: Int = 30
         var showsCursor: Bool = true
+        /// Attach global system audio to this stream (48 kHz stereo FLTP).
+        /// Only one display pipeline should have this enabled — macOS has no
+        /// concept of per-display audio.
+        var capturesSystemAudio: Bool = false
     }
 
     /// Seconds between preview thumbnails pushed to the UI.
@@ -41,11 +47,16 @@ final class DisplayCapture: NSObject, @unchecked Sendable {
     private static let statsWindow: TimeInterval = 1.0
     /// Preview thumbnail width in pixels.
     private static let previewWidth: CGFloat = 320
+    /// Seconds between audio-level publishes.
+    private static let audioLevelInterval: TimeInterval = 0.1
 
     let displayID: CGDirectDisplayID
 
-    /// All NDI sends and mutable capture state live on this serial queue.
+    /// All NDI video sends and mutable capture state live on this serial queue.
     private let queue: DispatchQueue
+    /// Audio callbacks run here; NDI documents audio and video may be sent
+    /// from separate threads, so no lock is needed between the two queues.
+    private let audioQueue: DispatchQueue
 
     // MARK: Queue-confined state (only touch on `queue`)
     private var stream: SCStream?
@@ -56,17 +67,29 @@ final class DisplayCapture: NSObject, @unchecked Sendable {
     private var totalFrames: UInt64 = 0
     private var lastPreviewDate: Date = .distantPast
     private var outputSize: (width: Int, height: Int) = (0, 0)
+    private var hasAudioOutput = false
     private lazy var previewContext = CIContext()
+
+    // MARK: Audio-queue-confined state (only touch on `audioQueue`)
+    private var deinterleaveBuffers: [UnsafeMutablePointer<Float>] = []
+    private var deinterleaveCapacity: Int = 0
+    private var lastAudioLevelDate: Date = .distantPast
+    private var warnedAudioFormat = false
 
     // MARK: Callbacks (always invoked on the main actor)
     var onStats: (@MainActor (CaptureStats) -> Void)?
     var onPreview: (@MainActor (CGImage) -> Void)?
     var onError: (@MainActor (String) -> Void)?
+    var onAudioLevel: (@MainActor (Float) -> Void)?
 
     init(display: SCDisplay) {
         self.displayID = display.displayID
         self.queue = DispatchQueue(
             label: "com.woodseedigi.dualcast.capture.\(display.displayID)",
+            qos: .userInitiated
+        )
+        self.audioQueue = DispatchQueue(
+            label: "com.woodseedigi.dualcast.audio.\(display.displayID)",
             qos: .userInitiated
         )
     }
@@ -78,7 +101,8 @@ final class DisplayCapture: NSObject, @unchecked Sendable {
 
         let sender = try NDISender(
             sourceName: configuration.ndiSourceName,
-            framesPerSecond: configuration.framesPerSecond
+            framesPerSecond: configuration.framesPerSecond,
+            clockAudio: configuration.capturesSystemAudio
         )
 
         let target = Self.scaledOutputSize(
@@ -100,11 +124,21 @@ final class DisplayCapture: NSObject, @unchecked Sendable {
         streamConfig.pixelFormat = kCVPixelFormatType_32BGRA
         streamConfig.queueDepth = 5
         streamConfig.showsCursor = configuration.showsCursor
-        streamConfig.capturesAudio = false
+        streamConfig.capturesAudio = configuration.capturesSystemAudio
+        if configuration.capturesSystemAudio {
+            // 48 kHz stereo is the NDI standard; exclude our own app's audio.
+            streamConfig.excludesCurrentProcessAudio = true
+            streamConfig.sampleRate = 48000
+            streamConfig.channelCount = 2
+        }
         streamConfig.colorSpaceName = CGColorSpace.sRGB
 
         let stream = SCStream(filter: filter, configuration: streamConfig, delegate: self)
         try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: queue)
+        if configuration.capturesSystemAudio {
+            try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: audioQueue)
+            hasAudioOutput = true
+        }
 
         self.stream = stream
         self.sender = sender
@@ -126,7 +160,11 @@ final class DisplayCapture: NSObject, @unchecked Sendable {
         }
         if let stream {
             try? stream.removeStreamOutput(self, type: .screen)
+            if hasAudioOutput {
+                try? stream.removeStreamOutput(self, type: .audio)
+            }
         }
+        hasAudioOutput = false
         stream = nil
         sender = nil
     }
@@ -166,7 +204,8 @@ final class DisplayCapture: NSObject, @unchecked Sendable {
             framesPerSecond: fps,
             framesSent: totalFrames,
             outputWidth: outputSize.width,
-            outputHeight: outputSize.height
+            outputHeight: outputSize.height,
+            hasAudio: hasAudioOutput
         )
         framesInWindow = 0
         windowStart = now
@@ -188,6 +227,138 @@ final class DisplayCapture: NSObject, @unchecked Sendable {
         let scaled = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
         return previewContext.createCGImage(scaled, from: scaled.extent)
     }
+
+    // MARK: - Audio processing (audioQueue only)
+
+    /// Extracts planar Float32 channels from an SCK audio sample and sends
+    /// them as an NDI FLTP frame. SCK is configured for 48 kHz stereo
+    /// non-interleaved Float32, which maps directly onto NDI's FLTP layout
+    /// with no conversion; an interleaved fallback deinterleaves into
+    /// preallocated buffers if the format ever differs.
+    private func processAudioSample(_ sampleBuffer: CMSampleBuffer) {
+        guard let sender else { return }
+        guard let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer),
+              let asbdPointer = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription) else { return }
+        let asbd = asbdPointer.pointee
+
+        var requiredSize = 0
+        var status = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
+            sampleBuffer,
+            bufferListSizeNeededOut: &requiredSize,
+            bufferListOut: nil,
+            bufferListSize: 0,
+            blockBufferAllocator: nil,
+            blockBufferMemoryAllocator: nil,
+            flags: 0,
+            blockBufferOut: nil
+        )
+        guard status == noErr, requiredSize > 0 else { return }
+
+        let ablStorage = UnsafeMutableRawPointer.allocate(byteCount: requiredSize, alignment: 16)
+        defer { ablStorage.deallocate() }
+
+        // The retained block buffer is ARC-managed in Swift (no manual release).
+        var blockBuffer: CMBlockBuffer?
+        status = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
+            sampleBuffer,
+            bufferListSizeNeededOut: nil,
+            bufferListOut: ablStorage.assumingMemoryBound(to: AudioBufferList.self),
+            bufferListSize: requiredSize,
+            blockBufferAllocator: nil,
+            blockBufferMemoryAllocator: nil,
+            flags: 0,
+            blockBufferOut: &blockBuffer
+        )
+        guard status == noErr else { return }
+
+        let isFloat = (asbd.mFormatFlags & kAudioFormatFlagIsFloat) != 0
+        guard asbd.mFormatID == kAudioFormatLinearPCM, isFloat, asbd.mBitsPerChannel == 32 else {
+            if !warnedAudioFormat {
+                warnedAudioFormat = true
+                NSLog("[DualCast] Dropping audio: unsupported format flags %u bits %u",
+                      asbd.mFormatFlags, asbd.mBitsPerChannel)
+            }
+            return
+        }
+
+        let abl = UnsafeMutableAudioBufferListPointer(
+            ablStorage.assumingMemoryBound(to: AudioBufferList.self)
+        )
+        let channelCount = max(Int(asbd.mChannelsPerFrame), 1)
+        let sampleRate = Int(asbd.mSampleRate)
+        let isNonInterleaved = (asbd.mFormatFlags & kAudioFormatFlagIsNonInterleaved) != 0
+
+        var channelPointers: [UnsafeMutablePointer<Float>?] = []
+        var sampleCount = 0
+        var channelStride = 0
+
+        if isNonInterleaved || channelCount == 1 || abl.count > 1 {
+            // Planar: one AudioBuffer per channel — direct pointer mapping.
+            for index in 0..<min(channelCount, abl.count) {
+                let buffer = abl[index]
+                channelPointers.append(buffer.mData?.assumingMemoryBound(to: Float.self))
+                if index == 0 {
+                    sampleCount = Int(buffer.mDataByteSize) / MemoryLayout<Float>.size
+                    channelStride = Int(buffer.mDataByteSize)
+                }
+            }
+        } else {
+            // Interleaved fallback: deinterleave into preallocated planar buffers.
+            guard let buffer = abl.first, let data = buffer.mData else { return }
+            let frames = Int(buffer.mDataByteSize) / (MemoryLayout<Float>.size * channelCount)
+            guard frames > 0 else { return }
+            ensureDeinterleaveCapacity(frames: frames, channels: channelCount)
+
+            let interleaved = data.assumingMemoryBound(to: Float.self)
+            for frame in 0..<frames {
+                for channel in 0..<channelCount {
+                    deinterleaveBuffers[channel][frame] = interleaved[frame * channelCount + channel]
+                }
+            }
+            channelPointers = deinterleaveBuffers.map { Optional($0) }
+            sampleCount = frames
+            channelStride = frames * MemoryLayout<Float>.size
+        }
+
+        guard sampleCount > 0, !channelPointers.isEmpty else { return }
+
+        publishAudioLevel(channels: channelPointers, sampleCount: sampleCount)
+        sender.send(
+            fltpChannels: channelPointers,
+            sampleRate: sampleRate,
+            sampleCount: sampleCount,
+            channelStrideBytes: channelStride
+        )
+    }
+
+    private func ensureDeinterleaveCapacity(frames: Int, channels: Int) {
+        guard deinterleaveBuffers.count != channels || frames > deinterleaveCapacity else { return }
+        deinterleaveBuffers.forEach { $0.deallocate() }
+        let capacity = max(frames * 2, 4800)
+        deinterleaveBuffers = (0..<channels).map { _ in
+            UnsafeMutablePointer<Float>.allocate(capacity: capacity)
+        }
+        deinterleaveCapacity = capacity
+    }
+
+    /// Peak level across channels, published to the UI at ~10 Hz.
+    private func publishAudioLevel(channels: [UnsafeMutablePointer<Float>?], sampleCount: Int) {
+        let now = Date()
+        guard now.timeIntervalSince(lastAudioLevelDate) >= Self.audioLevelInterval else { return }
+        lastAudioLevelDate = now
+
+        var peak: Float = 0
+        for channel in channels {
+            guard let pointer = channel else { continue }
+            var channelPeak: Float = 0
+            vDSP_maxmgv(pointer, 1, &channelPeak, vDSP_Length(sampleCount))
+            peak = max(peak, channelPeak)
+        }
+
+        let level = min(peak, 1)
+        let callback = onAudioLevel
+        Task { @MainActor in callback?(level) }
+    }
 }
 
 // MARK: - SCStreamOutput
@@ -195,7 +366,13 @@ final class DisplayCapture: NSObject, @unchecked Sendable {
 extension DisplayCapture: SCStreamOutput {
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
                 of type: SCStreamOutputType) {
-        // Arrives on `queue` (the sample handler queue passed to addStreamOutput).
+        // Video arrives on `queue`; audio arrives on `audioQueue`
+        // (the handler queues passed to addStreamOutput).
+        if type == .audio {
+            guard isRunning else { return }
+            processAudioSample(sampleBuffer)
+            return
+        }
         guard type == .screen, isRunning, let sender else { return }
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
 

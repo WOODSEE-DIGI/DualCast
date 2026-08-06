@@ -54,6 +54,8 @@ final class RelayEngine: @unchecked Sendable {
     private var windowStart: [Int: Date] = [:]
     private var totalFrames: [Int: UInt64] = [:]
     private var lastPreviewDate: [Int: Date] = [:]
+    /// Last time each slot received an audio frame (for the UI indicator).
+    private var lastAudioDate: [Int: Date] = [:]
     private let statsLock = NSLock()
     private let previewContext = CIContext()
 
@@ -69,7 +71,8 @@ final class RelayEngine: @unchecked Sendable {
             running = true
         }
 
-        let sender = try NDISender(sourceName: outputName, framesPerSecond: 30)
+        let sender = try NDISender(sourceName: outputName, framesPerSecond: 30,
+                                   clockAudio: true)
         sendLock.lock()
         self.sender = sender
         sendLock.unlock()
@@ -117,6 +120,9 @@ final class RelayEngine: @unchecked Sendable {
         let receiver = NDIReceiver()
         receiver.onVideoFrame = { [weak self] frame in
             self?.forward(frame, from: slot)
+        }
+        receiver.onAudioFrame = { [weak self] frame in
+            self?.forwardAudio(frame, from: slot)
         }
         receiver.onStatus = { [weak self] status in
             guard let callback = self?.onReceiverStatus else { return }
@@ -172,6 +178,14 @@ final class RelayEngine: @unchecked Sendable {
         return sender?.tally ?? NDISender.Tally()
     }
 
+    /// True when a slot has received audio within the last 2 seconds.
+    func audioAlive(for slot: Int) -> Bool {
+        statsLock.withLock {
+            guard let last = lastAudioDate[slot] else { return false }
+            return Date().timeIntervalSince(last) < 2
+        }
+    }
+
     // MARK: - Frame forwarding (capture threads)
 
     private func forward(_ frame: UnsafePointer<NDIlib_video_frame_v2_t>, from slot: Int) {
@@ -186,6 +200,21 @@ final class RelayEngine: @unchecked Sendable {
         sendLock.unlock()
     }
 
+    private func forwardAudio(_ frame: UnsafePointer<NDIlib_audio_frame_v3_t>, from slot: Int) {
+        statsLock.withLock { lastAudioDate[slot] = Date() }
+
+        // Audio is forwarded regardless of the active video slot: macOS
+        // system audio is global, not per-display, and only the
+        // audio-carrying source produces audio frames — so forwarding every
+        // incoming audio frame yields CONTINUOUS audio across display
+        // switches, which is what a stream wants. (If both inputs ever
+        // carried audio this would need an active-slot guard to avoid
+        // doubling; DualCast enforces a single audio display.)
+        sendLock.lock()
+        sender?.send(audioFrame: frame)
+        sendLock.unlock()
+    }
+
     private func updateStats(for slot: Int) {
         let now = Date()
 
@@ -193,7 +222,10 @@ final class RelayEngine: @unchecked Sendable {
             totalFrames[slot, default: 0] += 1
             framesInWindow[slot, default: 0] += 1
 
-            let start = windowStart[slot] ?? now
+            // distantPast default: the first window reports immediately —
+            // using `?? now` here previously meant elapsed was always ~0
+            // and stats never published.
+            let start = windowStart[slot] ?? .distantPast
             let elapsed = now.timeIntervalSince(start)
             guard elapsed >= Self.statsWindow else { return nil }
 

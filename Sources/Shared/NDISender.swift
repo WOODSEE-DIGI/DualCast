@@ -36,7 +36,8 @@ final class NDISender: @unchecked Sendable {
     private let fpsNum: Int32
     private let fpsDen: Int32
 
-    init(sourceName: String, groups: String? = nil, framesPerSecond: Int = 30) throws {
+    init(sourceName: String, groups: String? = nil, framesPerSecond: Int = 30,
+         clockAudio: Bool = false) throws {
         self.sourceName = sourceName
         self.fpsNum = Int32(framesPerSecond)
         self.fpsDen = 1
@@ -48,7 +49,7 @@ final class NDISender: @unchecked Sendable {
                         p_ndi_name: namePtr,
                         p_groups: groupsPtr,
                         clock_video: true,
-                        clock_audio: false
+                        clock_audio: clockAudio
                     )
                     return NDIlib_send_create(&settings)
                 }
@@ -57,7 +58,7 @@ final class NDISender: @unchecked Sendable {
                 p_ndi_name: namePtr,
                 p_groups: nil,
                 clock_video: true,
-                clock_audio: false
+                clock_audio: clockAudio
             )
             return NDIlib_send_create(&settings)
         }
@@ -98,6 +99,30 @@ final class NDISender: @unchecked Sendable {
     /// Call only while holding the sender's serialisation lock.
     func send(videoFrame frame: UnsafePointer<NDIlib_video_frame_v2_t>) {
         NDIlib_send_send_video_v2(instance, frame)
+    }
+
+    /// Relay passthrough for audio frames (same validity/locking rules as
+    /// the video passthrough).
+    func send(audioFrame frame: UnsafePointer<NDIlib_audio_frame_v3_t>) {
+        NDIlib_send_send_audio_v3(instance, frame)
+    }
+
+    /// Submit one chunk of planar Float32 audio (one pointer per channel).
+    /// Per NDI docs, audio and video may be sent from separate threads.
+    /// The channel buffers must remain valid for the duration of the call.
+    func send(fltpChannels channels: [UnsafeMutablePointer<Float>?],
+              sampleRate: Int, sampleCount: Int, channelStrideBytes: Int) {
+        var mutableChannels = channels
+        mutableChannels.withUnsafeMutableBufferPointer { buffer in
+            ndilib_send_audio_fltp(
+                instance,
+                buffer.baseAddress,
+                Int32(channels.count),
+                Int32(sampleRate),
+                Int32(sampleCount),
+                Int32(channelStrideBytes)
+            )
+        }
     }
 
     /// Number of receivers currently watching this source (non-blocking).

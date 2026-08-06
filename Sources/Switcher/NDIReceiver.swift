@@ -23,6 +23,8 @@ final class NDIReceiver: @unchecked Sendable {
 
     /// Called on the capture thread per video frame, while the frame is valid.
     var onVideoFrame: ((UnsafePointer<NDIlib_video_frame_v2_t>) -> Void)?
+    /// Called on the capture thread per audio frame, while the frame is valid.
+    var onAudioFrame: ((UnsafePointer<NDIlib_audio_frame_v3_t>) -> Void)?
     /// Called when the capture thread has fully torn down (recv destroyed).
     var onStopped: (() -> Void)?
     /// Called on the main actor when status changes.
@@ -98,28 +100,31 @@ final class NDIReceiver: @unchecked Sendable {
         report(.receiving)
         NSLog("[Switcher] recv created for: %@ url: %@", source.name, source.urlAddress)
 
-        guard let video = ndilib_video_frame_alloc() else {
+        guard let video = ndilib_video_frame_alloc(),
+              let audio = ndilib_audio_frame_alloc() else {
             NDIlib_recv_destroy(instance)
             report(.failed("Out of memory"))
             onStopped?()
             return
         }
-        defer { ndilib_video_frame_free(video) }
+        defer {
+            ndilib_video_frame_free(video)
+            ndilib_audio_frame_free(audio)
+        }
 
         var consecutiveErrors = 0
-        var debugFrames = 0
 
         while isRunning() {
-            let frameType = NDIlib_recv_capture_v3(instance, video, nil, nil, 500)
-            if debugFrames < 10 {
-                NSLog("[Switcher] %@ capture -> %d", source.shortName, frameType.rawValue)
-                debugFrames += 1
-            }
+            let frameType = NDIlib_recv_capture_v3(instance, video, audio, nil, 500)
 
             if frameType == NDIlib_frame_type_video {
                 consecutiveErrors = 0
                 onVideoFrame?(UnsafePointer(video))
                 NDIlib_recv_free_video_v2(instance, video)
+            } else if frameType == NDIlib_frame_type_audio {
+                consecutiveErrors = 0
+                onAudioFrame?(UnsafePointer(audio))
+                NDIlib_recv_free_audio_v3(instance, audio)
             } else if frameType == NDIlib_frame_type_none {
                 // Timeout with no frame — normal for low-frame-rate sources.
                 consecutiveErrors = 0

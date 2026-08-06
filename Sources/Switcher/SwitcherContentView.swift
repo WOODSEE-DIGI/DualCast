@@ -243,7 +243,8 @@ private struct SlotCardView: View {
         case .receiving:
             let fps = stats?.framesPerSecond ?? 0
             let frames = stats?.framesReceived ?? 0
-            return String(format: "%.0f fps · %llu frames", fps, frames)
+            let base = String(format: "%.0f fps · %llu frames", fps, frames)
+            return manager.slotAudioAlive[slot] == true ? base + " · 🔊" : base
         case .connecting:
             return "Connecting…"
         case .failed(let message):

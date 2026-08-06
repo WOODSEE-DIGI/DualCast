@@ -36,10 +36,27 @@ final class StreamManager {
 
     var displays: [DisplayItem] = []
     var previews: [CGDirectDisplayID: CGImage] = [:]
+    /// Latest audio peak per display (0...1), ~10 Hz while audio flows.
+    private(set) var audioLevels: [CGDirectDisplayID: Float] = [:]
     private(set) var permissionGranted = false
     private(set) var ndiAvailable = false
     private(set) var ndiVersion = ""
     var globalError: String? = nil
+
+    /// Which display's stream carries system audio (macOS has no per-display
+    /// audio — it can ride exactly one stream). Persisted across launches.
+    var audioDisplayID: CGDirectDisplayID? {
+        didSet {
+            let defaults = UserDefaults.standard
+            if let audioDisplayID {
+                defaults.set(Int64(bitPattern: UInt64(audioDisplayID)), forKey: Self.audioDisplayDefaultsKey)
+            } else {
+                defaults.removeObject(forKey: Self.audioDisplayDefaultsKey)
+            }
+        }
+    }
+
+    private static let audioDisplayDefaultsKey = "dualcast.audioDisplayID"
 
     /// SCDisplay lookup for the current shareable content snapshot.
     private var scDisplays: [CGDirectDisplayID: SCDisplay] = [:]
@@ -104,6 +121,18 @@ final class StreamManager {
                 }
                 return item
             }.sorted { $0.name < $1.name }
+
+            // Restore / default the audio-carrying display (main display first).
+            let stored = UserDefaults.standard.object(forKey: Self.audioDisplayDefaultsKey) as? Int64
+            let storedID = stored.map { CGDirectDisplayID(UInt64(bitPattern: $0)) }
+            if let storedID, displays.contains(where: { $0.id == storedID }) {
+                audioDisplayID = storedID
+            } else {
+                let mainID = NSScreen.main?.deviceDescription[
+                    NSDeviceDescriptionKey("NSScreenNumber")
+                ] as? CGDirectDisplayID
+                audioDisplayID = mainID ?? displays.first?.id
+            }
         } catch {
             globalError = "Failed to enumerate displays: \(error.localizedDescription)"
         }
@@ -147,10 +176,14 @@ final class StreamManager {
         pipeline.onError = { [weak self] message in
             self?.applyError(message, for: id)
         }
+        pipeline.onAudioLevel = { [weak self] level in
+            self?.audioLevels[id] = level
+        }
 
         do {
             let configuration = DisplayCapture.Configuration(
-                ndiSourceName: displays[index].ndiName
+                ndiSourceName: displays[index].ndiName,
+                capturesSystemAudio: id == audioDisplayID
             )
             try await pipeline.start(
                 display: scDisplay,
@@ -168,6 +201,7 @@ final class StreamManager {
     func stop(id: CGDirectDisplayID) async {
         guard let pipeline = pipelines.removeValue(forKey: id) else { return }
         await pipeline.stop()
+        audioLevels[id] = 0
         if let index = displays.firstIndex(where: { $0.id == id }) {
             displays[index].isStreaming = false
             displays[index].stats.isStreaming = false
@@ -179,6 +213,21 @@ final class StreamManager {
         if pipelines.isEmpty {
             tallyTask?.cancel()
             tallyTask = nil
+        }
+    }
+
+    /// Moves the audio-carrying stream to another display. If either the old
+    /// or new audio display is currently streaming, its pipeline is restarted
+    /// so the change applies immediately.
+    func setAudioDisplay(_ id: CGDirectDisplayID) async {
+        guard id != audioDisplayID else { return }
+        let previous = audioDisplayID
+        audioDisplayID = id
+
+        for affected in [previous, id].compactMap({ $0 }) {
+            guard pipelines[affected] != nil else { continue }
+            await stop(id: affected)
+            await start(id: affected)
         }
     }
 
