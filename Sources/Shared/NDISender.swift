@@ -92,6 +92,14 @@ final class NDISender: @unchecked Sendable {
         )
     }
 
+    /// Relay passthrough: forward an already-populated NDI video frame (e.g.
+    /// one received from another NDI source) without touching its fields.
+    /// The frame's data must remain valid for the duration of the call.
+    /// Call only while holding the sender's serialisation lock.
+    func send(videoFrame frame: UnsafePointer<NDIlib_video_frame_v2_t>) {
+        NDIlib_send_send_video_v2(instance, frame)
+    }
+
     /// Number of receivers currently watching this source (non-blocking).
     var connectionCount: Int {
         Int(NDIlib_send_get_no_connections(instance, 0))

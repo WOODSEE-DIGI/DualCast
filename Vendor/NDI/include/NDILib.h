@@ -18,6 +18,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdlib.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -103,6 +104,119 @@ int NDIlib_send_get_no_connections(NDIlib_send_instance_t p_instance,
 void NDIlib_send_get_tally(NDIlib_send_instance_t p_instance,
                            NDIlib_tally_t *p_tally, uint32_t timeout_in_ms);
 
+// MARK: - Finding (source discovery)
+
+typedef void *NDIlib_find_instance_t;
+
+typedef struct NDIlib_find_create_t {
+    /// Include sources running on this machine.
+    bool show_local_sources;
+    /// Comma-separated groups to search (NULL = default group).
+    const char *p_groups;
+    /// Comma-separated extra IPs/subnets to query (NULL = none).
+    const char *extra_ips;
+} NDIlib_find_create_t;
+
+/// A discovered NDI source. The NDI 5+ url address occupies the same ABI
+/// slot as the NDI 4.x ip address, so this flat layout is ABI-correct.
+typedef struct NDIlib_source_t {
+    /// Display name, e.g. "SHOOTYS-MAC-STUDIO.LOCAL (DualCast Studio Display)".
+    const char *p_ndi_name;
+    /// "ip:port" of the source (may be NULL for some discovery paths).
+    const char *p_url_address;
+} NDIlib_source_t;
+
+NDIlib_find_instance_t NDIlib_find_create_v2(const NDIlib_find_create_t *p_create_settings);
+void NDIlib_find_destroy(NDIlib_find_instance_t p_instance);
+
+/// Array of currently known sources; valid until the next call on this
+/// instance. Copy any strings you need to keep.
+const NDIlib_source_t *NDIlib_find_get_current_sources(NDIlib_find_instance_t p_instance,
+                                                       uint32_t *p_no_sources);
+
+/// Blocks up to timeout_in_ms; returns true if the source list changed.
+bool NDIlib_find_wait_for_sources(NDIlib_find_instance_t p_instance,
+                                  uint32_t timeout_in_ms);
+
+// MARK: - Receiving
+
+typedef void *NDIlib_recv_instance_t;
+
+typedef enum NDIlib_recv_bandwidth_e {
+    NDIlib_recv_bandwidth_metadata_only = -10,
+    NDIlib_recv_bandwidth_audio_only = 10,
+    NDIlib_recv_bandwidth_lowest = 0,
+    NDIlib_recv_bandwidth_highest = 100
+} NDIlib_recv_bandwidth_e;
+
+typedef enum NDIlib_recv_color_format_e {
+    NDIlib_recv_color_format_BGRX_BGRA = 0,
+    NDIlib_recv_color_format_UYVY_BGRA = 1,
+    NDIlib_recv_color_format_RGBX_RGBA = 2,
+    NDIlib_recv_color_format_UYVY_RGBA = 3,
+    NDIlib_recv_color_format_fastest = 100,
+    NDIlib_recv_color_format_best = 101
+} NDIlib_recv_color_format_e;
+
+typedef enum NDIlib_frame_type_e {
+    NDIlib_frame_type_none = 0,
+    NDIlib_frame_type_video = 1,
+    NDIlib_frame_type_audio = 2,
+    NDIlib_frame_type_metadata = 3,
+    NDIlib_frame_type_error = 4,
+    NDIlib_frame_type_status_change = 100
+} NDIlib_frame_type_e;
+
+typedef struct NDIlib_metadata_frame_t {
+    int length;
+    int64_t timecode;
+    char *p_data;
+} NDIlib_metadata_frame_t;
+
+/// Declared for signature completeness; DualCast passes NULL for audio.
+typedef struct NDIlib_audio_frame_v3_t {
+    int sample_rate;
+    int no_channels;
+    int no_samples;
+    int64_t timecode;
+    int FourCC;
+    float *p_data;
+    union {
+        int channel_stride_in_bytes;
+        const char *p_metadata;
+    };
+    int64_t timestamp;
+} NDIlib_audio_frame_v3_t;
+
+typedef struct NDIlib_recv_create_v3_t {
+    NDIlib_source_t source_to_connect_to;
+    NDIlib_recv_color_format_e color_format;
+    NDIlib_recv_bandwidth_e bandwidth;
+    /// false = de-interlaced progressive frames (what we want).
+    bool allow_video_fields;
+    /// Name shown to the source for this connection (may be NULL).
+    const char *p_ndi_recv_name;
+} NDIlib_recv_create_v3_t;
+
+NDIlib_recv_instance_t NDIlib_recv_create_v3(const NDIlib_recv_create_v3_t *p_create_settings);
+void NDIlib_recv_destroy(NDIlib_recv_instance_t p_instance);
+
+/// Pull the next frame; blocks up to timeout_in_ms. Video/audio/metadata may
+/// be NULL to skip that stream. Returned frames must be freed with the
+/// matching NDIlib_recv_free_* call.
+NDIlib_frame_type_e NDIlib_recv_capture_v3(NDIlib_recv_instance_t p_instance,
+                                           NDIlib_video_frame_v2_t *p_video_data,
+                                           NDIlib_audio_frame_v3_t *p_audio_data,
+                                           NDIlib_metadata_frame_t *p_metadata,
+                                           uint32_t timeout_in_ms);
+
+void NDIlib_recv_free_video_v2(NDIlib_recv_instance_t p_instance,
+                               const NDIlib_video_frame_v2_t *p_video_data);
+
+/// Change receive bandwidth on the fly (e.g. lowest for inactive inputs).
+bool NDIlib_recv_set_bandwidth(NDIlib_recv_instance_t p_instance,
+                               NDIlib_recv_bandwidth_e bandwidth);
+
 // MARK: - Convenience helpers
 
 /// Submit one progressive BGRA frame with synthesized timecode.
@@ -127,6 +241,22 @@ static inline void ndilib_send_video_bgra(NDIlib_send_instance_t sender,
     frame.line_stride_in_bytes = stride;
     NDIlib_send_send_video_v2(sender, &frame);
 }
+
+/// Zero-initialised heap allocation for use with NDIlib_recv_capture_v3,
+/// so Swift never has to memberwise-initialise the union-bearing struct.
+static inline NDIlib_video_frame_v2_t *ndilib_video_frame_alloc(void) {
+    return (NDIlib_video_frame_v2_t *)calloc(1, sizeof(NDIlib_video_frame_v2_t));
+}
+
+static inline void ndilib_video_frame_free(NDIlib_video_frame_v2_t *f) {
+    free(f);
+}
+
+/// Field readers that keep the anonymous union out of Swift's view.
+static inline int ndilib_video_width(const NDIlib_video_frame_v2_t *f) { return f->xres; }
+static inline int ndilib_video_height(const NDIlib_video_frame_v2_t *f) { return f->yres; }
+static inline int ndilib_video_stride(const NDIlib_video_frame_v2_t *f) { return f->line_stride_in_bytes; }
+static inline uint8_t *ndilib_video_data(const NDIlib_video_frame_v2_t *f) { return f->p_data; }
 
 #ifdef __cplusplus
 }

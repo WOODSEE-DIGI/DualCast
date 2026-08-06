@@ -1,5 +1,12 @@
-# DualCast — dual-display NDI screen capture for streaming
+# DualCast — dual-display NDI screen capture + NDI switcher relay
 # Regenerate the Xcode project after editing:  xcodegen generate
+#
+# Targets:
+#   DualCast          (sender, runs on the coding Mac) — captures each display
+#                      as an independent NDI source.
+#   DualCastSwitcher  (relay, runs on the streaming Mac) — receives both
+#                      sources and re-broadcasts the selected one as a
+#                      single NDI output for Ecamm Live.
 
 name: DualCast
 
@@ -24,7 +31,8 @@ targets:
     type: application
     platform: macOS
     sources:
-      - path: Sources
+      - path: Sources/DualCast
+      - path: Sources/Shared
       - path: Vendor
         buildPhase: none
     info:
@@ -40,6 +48,42 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.woodseedigi.DualCast
         PRODUCT_NAME: DualCast
+        CODE_SIGN_ENTITLEMENTS: "$(SRCROOT)/Resources/DualCast.entitlements"
+        SWIFT_OBJC_BRIDGING_HEADER: "$(SRCROOT)/Vendor/NDI/DualCast-Bridging-Header.h"
+        HEADER_SEARCH_PATHS: "$(SRCROOT)/Vendor/NDI/include"
+        LIBRARY_SEARCH_PATHS:
+          - "$(inherited)"
+          - "$(SRCROOT)/Vendor/NDI"
+        LD_RUNPATH_SEARCH_PATHS:
+          - "$(inherited)"
+          - "@executable_path/../Frameworks"
+    dependencies:
+      - framework: Vendor/NDI/libndi.dylib
+        embed: true
+        codeSign: true
+
+  DualCastSwitcher:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources/Switcher
+      - path: Sources/Shared
+      - path: Vendor
+        buildPhase: none
+    info:
+      path: Resources/SwitcherInfo.plist
+      properties:
+        CFBundleName: DualCast Switcher
+        CFBundleDisplayName: DualCast Switcher
+        CFBundleExecutable: DualCastSwitcher
+        CFBundlePackageType: APPL
+        NSPrincipalClass: NSApplication
+        LSMinimumSystemVersion: "14.0"
+        NSHumanReadableCopyright: "woodsee"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.woodseedigi.DualCastSwitcher
+        PRODUCT_NAME: DualCastSwitcher
         CODE_SIGN_ENTITLEMENTS: "$(SRCROOT)/Resources/DualCast.entitlements"
         SWIFT_OBJC_BRIDGING_HEADER: "$(SRCROOT)/Vendor/NDI/DualCast-Bridging-Header.h"
         HEADER_SEARCH_PATHS: "$(SRCROOT)/Vendor/NDI/include"
