@@ -8,6 +8,8 @@
 	<string>DualCast Switcher</string>
 	<key>CFBundleExecutable</key>
 	<string>DualCastSwitcher</string>
+	<key>CFBundleIconFile</key>
+	<string>DualCastSwitcher.icns</string>
 	<key>CFBundleIdentifier</key>
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleInfoDictionaryVersion</key>
