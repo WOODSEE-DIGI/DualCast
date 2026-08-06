@@ -8,6 +8,10 @@ Dual-display NDI screen capture for macOS — send two displays as separate NDI
 sources over your network. Works with any NDI-capable receiver (Ecamm Live,
 OBS, NDI Studio Monitor, etc.) with no extra software required.
 
+<p align="center">
+  <img src="images/dualcast-streaming.png" alt="DualCast capturing two displays with live stats" width="720">
+</p>
+
 ```
 ┌──────────────┐   2× NDI 1440p30   ┌───────────────────┐
 │   DualCast   │ ─────────────────► │  Ecamm Live /     │
@@ -35,6 +39,10 @@ selected one as a single output. This is **not required** if your receiver
 The Switcher adds Stream Deck hotkey switching (⌃⌥⌘1 / ⌃⌥⌘2 / ⌃⌥⌘3)
 and is useful when your streaming software can only see one NDI source at a
 time.
+
+<p align="center">
+  <img src="images/switcher-on-air.png" alt="DualCast Switcher with ON AIR badge" width="600">
+</p>
 
 ```
 ┌──────────────┐   2× NDI 1440p30   ┌───────────────────┐   1× NDI   ┌───────────┐
