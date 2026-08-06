@@ -120,7 +120,7 @@ typedef struct NDIlib_find_create_t {
 /// A discovered NDI source. The NDI 5+ url address occupies the same ABI
 /// slot as the NDI 4.x ip address, so this flat layout is ABI-correct.
 typedef struct NDIlib_source_t {
-    /// Display name, e.g. "SHOOTYS-MAC-STUDIO.LOCAL (DualCast Studio Display)".
+    /// Display name, e.g. "MY-MAC (DualCast Studio Display)".
     const char *p_ndi_name;
     /// "ip:port" of the source (may be NULL for some discovery paths).
     const char *p_url_address;

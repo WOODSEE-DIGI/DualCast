@@ -3,7 +3,8 @@
 //  DualCast
 //
 //  App entry point. Streams each connected display as an independent NDI
-//  source so a remote machine (e.g. shootymax running OBS) can receive them.
+//  source so a remote streaming Mac (running DualCast Switcher, OBS with
+//  obs-ndi, Ecamm Live, or any NDI receiver) can receive them.
 //
 
 import SwiftUI

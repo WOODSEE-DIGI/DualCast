@@ -12,7 +12,7 @@ import Foundation
 
 /// A discovered NDI source, with strings copied out of NDI-owned memory.
 struct NDISourceInfo: Sendable, Hashable {
-    /// Full NDI name, e.g. "SHOOTYS-MAC-STUDIO.LOCAL (DualCast Studio Display)".
+    /// Full NDI name, e.g. "MY-MAC (DualCast Studio Display)".
     var name: String
     /// "ip:port" of the source (may be empty for some discovery paths).
     var urlAddress: String
