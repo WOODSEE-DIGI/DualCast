@@ -21,13 +21,13 @@ echo "==> Patching camera extension embed phase..."
 python3 scripts/fix-camera-extension-embed.py
 
 echo "==> Building DualCast..."
-xcodebuild -scheme DualCast -configuration Debug build
+xcodebuild -scheme DualCast -configuration Debug -allowProvisioningUpdates build
 
 echo "==> Building DualCastSwitcher + Camera Extension..."
-xcodebuild -scheme DualCastSwitcher -configuration Debug build
+xcodebuild -scheme DualCastSwitcher -configuration Debug -allowProvisioningUpdates build
 
 echo "==> Building DualCastAudioDriver..."
-xcodebuild -scheme DualCastAudioDriver -configuration Debug build
+xcodebuild -scheme DualCastAudioDriver -configuration Debug -allowProvisioningUpdates build
 
 echo ""
 echo "==> Build complete."
