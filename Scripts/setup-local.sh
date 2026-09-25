@@ -33,9 +33,9 @@ echo "==> Patching camera extension embed phase..."
 python3 scripts/fix-camera-extension-embed.py
 
 echo "==> Building Debug binaries..."
-xcodebuild -target DualCast -configuration Debug -derivedDataPath "$DERIVED_DATA" -allowProvisioningUpdates -allowProvisioningDeviceRegistration build
-xcodebuild -target DualCastSwitcher -configuration Debug -derivedDataPath "$DERIVED_DATA" -allowProvisioningUpdates -allowProvisioningDeviceRegistration build
-xcodebuild -target DualCastAudioDriver -configuration Debug -derivedDataPath "$DERIVED_DATA" -allowProvisioningUpdates -allowProvisioningDeviceRegistration build
+xcodebuild -scheme DualCast -configuration Debug -derivedDataPath "$DERIVED_DATA" -allowProvisioningUpdates -allowProvisioningDeviceRegistration build
+xcodebuild -scheme DualCastSwitcher -configuration Debug -derivedDataPath "$DERIVED_DATA" -allowProvisioningUpdates -allowProvisioningDeviceRegistration build
+xcodebuild -scheme DualCastAudioDriver -configuration Debug -derivedDataPath "$DERIVED_DATA" -allowProvisioningUpdates -allowProvisioningDeviceRegistration build
 
 echo "==> Installing DualCast.app to /Applications..."
 sudo rm -rf /Applications/DualCast.app

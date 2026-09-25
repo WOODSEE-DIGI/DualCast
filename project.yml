@@ -197,3 +197,19 @@ targets:
     dependencies:
       - sdk: CoreAudio.framework
       - sdk: CoreFoundation.framework
+
+# Explicit schemes ensure xcodegen creates them even on machines where
+# automatic scheme generation behaves differently.
+schemes:
+  DualCast:
+    build:
+      targets:
+        DualCast: all
+  DualCastSwitcher:
+    build:
+      targets:
+        DualCastSwitcher: all
+  DualCastAudioDriver:
+    build:
+      targets:
+        DualCastAudioDriver: all
