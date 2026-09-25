@@ -18,6 +18,14 @@ BUILT_PRODUCTS="${DERIVED_DATA}/Build/Products/Debug"
 
 cd "$PROJECT_ROOT"
 
+# Verify full Xcode is installed (Command Line Tools alone are not enough).
+if ! xcode-select -p | grep -q "Xcode.app"; then
+    echo "ERROR: Full Xcode.app is required, but only Command Line Tools are installed."
+    echo "Install Xcode from the App Store or https://developer.apple.com/download/"
+    echo "Then run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer"
+    exit 1
+fi
+
 echo "==> Generating Xcode project..."
 xcodegen generate
 
