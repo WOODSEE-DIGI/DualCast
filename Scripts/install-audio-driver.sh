@@ -22,7 +22,7 @@ fi
 
 echo "Building DualCastAudioDriver..."
 cd "$PROJECT_ROOT"
-xcodebuild -scheme DualCastAudioDriver -configuration Debug -derivedDataPath "$DERIVED_DATA" -allowProvisioningUpdates -allowProvisioningDeviceRegistration build >/tmp/dualcast-audio-driver-build.log 2>&1
+xcodebuild -target DualCastAudioDriver -configuration Debug -derivedDataPath "$DERIVED_DATA" -allowProvisioningUpdates -allowProvisioningDeviceRegistration build >/tmp/dualcast-audio-driver-build.log 2>&1
 
 if [[ ! -d "$BUILT_DRIVER" ]]; then
     echo "Driver not found at $BUILT_DRIVER"

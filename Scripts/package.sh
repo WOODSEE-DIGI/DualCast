@@ -51,9 +51,9 @@ echo "==> Patching camera extension embed phase..."
 python3 scripts/fix-camera-extension-embed.py
 
 echo "==> Building ${CONFIG} binaries..."
-xcodebuild -scheme DualCast -configuration "$CONFIG" -derivedDataPath "$DERIVED_DATA" -allowProvisioningUpdates -allowProvisioningDeviceRegistration build
-xcodebuild -scheme DualCastSwitcher -configuration "$CONFIG" -derivedDataPath "$DERIVED_DATA" -allowProvisioningUpdates -allowProvisioningDeviceRegistration build
-xcodebuild -scheme DualCastAudioDriver -configuration "$CONFIG" -derivedDataPath "$DERIVED_DATA" -allowProvisioningUpdates -allowProvisioningDeviceRegistration build
+xcodebuild -target DualCast -configuration "$CONFIG" -derivedDataPath "$DERIVED_DATA" -allowProvisioningUpdates -allowProvisioningDeviceRegistration build
+xcodebuild -target DualCastSwitcher -configuration "$CONFIG" -derivedDataPath "$DERIVED_DATA" -allowProvisioningUpdates -allowProvisioningDeviceRegistration build
+xcodebuild -target DualCastAudioDriver -configuration "$CONFIG" -derivedDataPath "$DERIVED_DATA" -allowProvisioningUpdates -allowProvisioningDeviceRegistration build
 
 BUILT_PRODUCTS="${DERIVED_DATA}/Build/Products/${CONFIG}"
 DUALCAST_APP="${BUILT_PRODUCTS}/DualCast.app"

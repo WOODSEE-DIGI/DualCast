@@ -21,19 +21,19 @@ echo "==> Patching camera extension embed phase..."
 python3 scripts/fix-camera-extension-embed.py
 
 echo "==> Building DualCast..."
-xcodebuild -scheme DualCast -configuration Debug -allowProvisioningUpdates -allowProvisioningDeviceRegistration build
+xcodebuild -target DualCast -configuration Debug -allowProvisioningUpdates -allowProvisioningDeviceRegistration build
 
 echo "==> Building DualCastSwitcher + Camera Extension..."
-xcodebuild -scheme DualCastSwitcher -configuration Debug -allowProvisioningUpdates -allowProvisioningDeviceRegistration build
+xcodebuild -target DualCastSwitcher -configuration Debug -allowProvisioningUpdates -allowProvisioningDeviceRegistration build
 
 echo "==> Building DualCastAudioDriver..."
-xcodebuild -scheme DualCastAudioDriver -configuration Debug -allowProvisioningUpdates -allowProvisioningDeviceRegistration build
+xcodebuild -target DualCastAudioDriver -configuration Debug -allowProvisioningUpdates -allowProvisioningDeviceRegistration build
 
 echo ""
 echo "==> Build complete."
-echo "    DualCast.app:           $(xcodebuild -scheme DualCast -configuration Debug -showBuildSettings 2>/dev/null | grep -m1 'BUILT_PRODUCTS_DIR' | sed 's/.*= //')/DualCast.app"
-echo "    DualCastSwitcher.app:   $(xcodebuild -scheme DualCastSwitcher -configuration Debug -showBuildSettings 2>/dev/null | grep -m1 'BUILT_PRODUCTS_DIR' | sed 's/.*= //')/DualCastSwitcher.app"
-echo "    DualCastAudioDriver.driver: $(xcodebuild -scheme DualCastAudioDriver -configuration Debug -showBuildSettings 2>/dev/null | grep -m1 'BUILT_PRODUCTS_DIR' | sed 's/.*= //')/DualCastAudioDriver.driver"
+echo "    DualCast.app:           $(xcodebuild -target DualCast -configuration Debug -showBuildSettings 2>/dev/null | grep -m1 'BUILT_PRODUCTS_DIR' | sed 's/.*= //')/DualCast.app"
+echo "    DualCastSwitcher.app:   $(xcodebuild -target DualCastSwitcher -configuration Debug -showBuildSettings 2>/dev/null | grep -m1 'BUILT_PRODUCTS_DIR' | sed 's/.*= //')/DualCastSwitcher.app"
+echo "    DualCastAudioDriver.driver: $(xcodebuild -target DualCastAudioDriver -configuration Debug -showBuildSettings 2>/dev/null | grep -m1 'BUILT_PRODUCTS_DIR' | sed 's/.*= //')/DualCastAudioDriver.driver"
 echo ""
 echo "Next steps:"
 echo "  1. Run DualCast.app on the sending Mac."
