@@ -231,6 +231,9 @@ private struct SlotCardView: View {
 
             Picker("Source", selection: Binding(get: { selectedName }, set: { selectedName = $0 })) {
                 Text("Not assigned").tag("")
+                if !selectedName.isEmpty && !manager.discoveredSources.contains(where: { $0.name == selectedName }) {
+                    Text(selectedName).tag(selectedName)
+                }
                 ForEach(manager.discoveredSources, id: \.name) { source in
                     Text(source.shortName).tag(source.name)
                 }
