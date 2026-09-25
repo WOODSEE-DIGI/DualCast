@@ -25,11 +25,15 @@ struct ContentView: View {
                 )
             } else if !manager.permissionGranted {
                 permissionBanner
+            } else if !manager.cameraPermissionGranted {
+                cameraPermissionBanner
             }
 
             if let error = manager.globalError, manager.ndiAvailable, manager.permissionGranted {
                 banner(text: error, color: .orange)
             }
+
+            SectionHeader(title: "Displays", icon: "display.2")
 
             ForEach($manager.displays) { $display in
                 DisplayRowView(
@@ -56,6 +60,31 @@ struct ContentView: View {
                     "No Displays Found",
                     systemImage: "display.2",
                     description: Text("Grant screen recording permission, then refresh.")
+                )
+            }
+
+            SectionHeader(title: "Cameras", icon: "camera.fill")
+
+            ForEach($manager.cameras) { $camera in
+                CameraRowView(
+                    camera: $camera,
+                    preview: manager.cameraPreviews[camera.id]
+                ) {
+                    Task {
+                        if camera.isStreaming {
+                            await manager.stopCamera(id: camera.id)
+                        } else {
+                            await manager.startCamera(id: camera.id)
+                        }
+                    }
+                }
+            }
+
+            if manager.cameras.isEmpty, manager.cameraPermissionGranted {
+                ContentUnavailableView(
+                    "No Cameras Found",
+                    systemImage: "camera",
+                    description: Text("Connect a webcam or ensure FaceTime camera is available.")
                 )
             }
 
@@ -98,6 +127,26 @@ struct ContentView: View {
             Button("Open Settings") {
                 if let url = URL(
                     string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
+                ) {
+                    NSWorkspace.shared.open(url)
+                }
+            }
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.orange))
+    }
+
+    private var cameraPermissionBanner: some View {
+        HStack {
+            Label("Camera access required", systemImage: "exclamationmark.shield")
+                .foregroundStyle(.white)
+            Spacer()
+            Button("Grant Access…") {
+                Task { await manager.requestCameraPermission() }
+            }
+            Button("Open Settings") {
+                if let url = URL(
+                    string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera"
                 ) {
                     NSWorkspace.shared.open(url)
                 }
@@ -285,6 +334,130 @@ private struct DisplayRowView: View {
             }
         }
         .frame(width: 160)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+
+    private func badge(_ text: String, _ color: Color) -> some View {
+        Text(text)
+            .font(.caption.bold())
+            .padding(.horizontal, 8)
+            .padding(.vertical, 2)
+            .background(Capsule().fill(color))
+            .foregroundStyle(.white)
+    }
+}
+
+// MARK: - Section header
+
+private struct SectionHeader: View {
+    let title: String
+    let icon: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+                .foregroundStyle(.secondary)
+            Text(title)
+                .font(.headline)
+            Spacer()
+        }
+    }
+}
+
+// MARK: - Camera row
+
+private struct CameraRowView: View {
+    @Binding var camera: StreamManager.CameraItem
+    let preview: CGImage?
+    let onToggleStreaming: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 14) {
+            previewView
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Toggle(isOn: $camera.isEnabled) {
+                        Text(camera.name).font(.headline)
+                    }
+                    .toggleStyle(.checkbox)
+                    .disabled(camera.isStreaming)
+
+                    Spacer()
+
+                    if camera.stats.onProgram {
+                        badge("LIVE", .red)
+                    } else if camera.stats.onPreview {
+                        badge("PREVIEW", .green)
+                    }
+                }
+
+                HStack {
+                    Text("NDI name:")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    TextField("Source name", text: $camera.ndiName)
+                        .textFieldStyle(.roundedBorder)
+                        .disabled(camera.isStreaming)
+                }
+
+                HStack(spacing: 12) {
+                    Circle()
+                        .fill(camera.isStreaming ? Color.green : Color.gray.opacity(0.4))
+                        .frame(width: 8, height: 8)
+
+                    if camera.isStreaming {
+                        Text(String(format: "%.0f fps", camera.stats.framesPerSecond))
+                        Text("·")
+                        Text("\(camera.stats.framesSent) frames")
+                        Text("·")
+                        Text(camera.stats.connections == 1
+                             ? "1 receiver"
+                             : "\(camera.stats.connections) receivers")
+                    } else {
+                        Text("Not streaming").foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    Button(camera.isStreaming ? "Stop" : "Start", action: onToggleStreaming)
+                        .disabled(!camera.isEnabled && !camera.isStreaming)
+                }
+                .font(.callout)
+
+                if let error = camera.error {
+                    Label(error, systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color(nsColor: .controlBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(camera.stats.onProgram ? Color.red : Color.clear, lineWidth: 2)
+        )
+    }
+
+    private var previewView: some View {
+        Group {
+            if let preview {
+                Image(decorative: preview, scale: 1.0)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+            } else {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 6).fill(.black.opacity(0.6))
+                    Image(systemName: camera.isStreaming ? "dot.radiowaves.left.and.right" : "camera")
+                        .foregroundStyle(.white.opacity(0.7))
+                }
+            }
+        }
+        .frame(width: 160, height: 90)
         .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+        NDI's mDNS discovery + raw sockets are not sandbox-compatible without
+        significant restrictions, so DualCast Switcher ships unsandboxed.
+        Hardened Runtime stays enabled. disable-library-validation lets the app
+        load the NewTek-signed libndi.dylib when it hasn't been re-signed on embed.
+    -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+    <!-- App Group used to pass NDI source assignments to the camera extension. -->
+    <key>com.apple.security.application-groups</key>
+    <array>
+        <string>group.com.woodseedigi.DualCast</string>
+    </array>
+    <!-- Required to activate the ExtensionKit camera extension. -->
+    <key>com.apple.developer.system-extension.install</key>
+    <true/>
+</dict>
+</plist>

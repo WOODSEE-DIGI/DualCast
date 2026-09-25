@@ -5,32 +5,31 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>DualCast</string>
+	<string>DualCast Virtual Camera</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
-	<key>CFBundleIconFile</key>
-	<string>DualCast.icns</string>
 	<key>CFBundleIdentifier</key>
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>DualCast</string>
+	<string>DualCast Virtual Camera</string>
 	<key>CFBundlePackageType</key>
-	<string>APPL</string>
+	<string>XPC!</string>
 	<key>CFBundleShortVersionString</key>
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
-	<key>NSCameraUsageDescription</key>
-	<string>DualCast publishes your cameras as NDI sources on the local network.</string>
+	<key>NSExtension</key>
+	<dict>
+		<key>NSExtensionPointIdentifier</key>
+		<string>com.apple.cmio.DPA.camera</string>
+		<key>NSExtensionPrincipalClass</key>
+		<string>DualCastCameraExtension.CameraExtensionProvider</string>
+	</dict>
 	<key>NSHumanReadableCopyright</key>
 	<string>woodsee</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>DualCast captures system audio and attaches it to the selected display stream.</string>
-	<key>NSPrincipalClass</key>
-	<string>NSApplication</string>
 </dict>
 </plist>

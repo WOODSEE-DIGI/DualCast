@@ -75,7 +75,7 @@ final class NDIReceiver: @unchecked Sendable {
         let instance: NDIlib_recv_instance_t? = source.name.withCString { namePtr in
             source.urlAddress.withCString { urlPtr in
                 "DualCast Switcher".withCString { recvNamePtr in
-                    var rawSource = NDIlib_source_t(
+                    let rawSource = NDIlib_source_t(
                         p_ndi_name: namePtr,
                         p_url_address: urlPtr
                     )
@@ -98,7 +98,7 @@ final class NDIReceiver: @unchecked Sendable {
         }
 
         report(.receiving)
-        NSLog("[Switcher] recv created for: %@ url: %@", source.name, source.urlAddress)
+        NSLog("[DualCast] recv created for: %@ url: %@", source.name, source.urlAddress)
 
         guard let video = ndilib_video_frame_alloc(),
               let audio = ndilib_audio_frame_alloc() else {

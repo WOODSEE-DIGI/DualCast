@@ -4,6 +4,10 @@
 # Xcode / build artifacts
 DerivedData/
 build/
+build-debug/
+build-release/
+build-driver/
+dist/
 *.xcuserstate
 xcuserdata/
 *.moved-aside

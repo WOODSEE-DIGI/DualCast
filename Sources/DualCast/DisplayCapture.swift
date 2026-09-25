@@ -13,6 +13,7 @@ import CoreImage
 import CoreMedia
 import CoreVideo
 import Foundation
+import OSLog
 @preconcurrency import ScreenCaptureKit
 
 /// Snapshot of a running pipeline, published to the UI about once per second.
@@ -58,6 +59,8 @@ final class DisplayCapture: NSObject, @unchecked Sendable {
     /// from separate threads, so no lock is needed between the two queues.
     private let audioQueue: DispatchQueue
 
+    private static let logger = Logger(subsystem: "com.woodseedigi.dualcast", category: "DisplayCapture")
+
     // MARK: Queue-confined state (only touch on `queue`)
     private var stream: SCStream?
     private var sender: NDISender?
@@ -76,8 +79,11 @@ final class DisplayCapture: NSObject, @unchecked Sendable {
     private var audioPlanarCapacity: Int = 0
     private var lastAudioLevelDate: Date = .distantPast
     private var warnedAudioFormat = false
-    #if DEBUG
     private var audioTXCount = 0
+    private var audioFramesPerSecond: Int = 30
+    /// Buffers SCK audio into frame-aligned chunks matching the video cadence.
+    private var audioFrameBuffer = AudioFrameBuffer()
+    #if DEBUG
     private func audioDebugLog(_ message: String) {
         let line = "\(Date()): TX \(message)\n"
         guard let data = line.data(using: .utf8) else { return }
@@ -115,7 +121,10 @@ final class DisplayCapture: NSObject, @unchecked Sendable {
         let sender = try NDISender(
             sourceName: configuration.ndiSourceName,
             framesPerSecond: configuration.framesPerSecond,
-            clockAudio: configuration.capturesSystemAudio
+            // Audio is forwarded from SCK in irregular chunks; do not ask NDI
+            // to clock it. Free-running audio stays in sync via synthesized
+            // timecodes and avoids receivers (e.g. Ecamm) dropping the stream.
+            clockAudio: false
         )
 
         let target = Self.scaledOutputSize(
@@ -146,19 +155,26 @@ final class DisplayCapture: NSObject, @unchecked Sendable {
         }
         streamConfig.colorSpaceName = CGColorSpace.sRGB
 
+        // Keep the sender alive before any callbacks can fire.
+        self.sender = sender
+        self.outputSize = target
+        self.audioFramesPerSecond = configuration.framesPerSecond
+
         let stream = SCStream(filter: filter, configuration: streamConfig, delegate: self)
         try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: queue)
         if configuration.capturesSystemAudio {
+            audioFrameBuffer.reset()
             try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: audioQueue)
             hasAudioOutput = true
         }
 
         self.stream = stream
-        self.sender = sender
-        self.outputSize = target
 
         try await stream.startCapture()
         isRunning = true
+        if configuration.capturesSystemAudio {
+            Self.logger.info("Started capture for '\(configuration.ndiSourceName, privacy: .public)' with system audio")
+        }
         reportStats(force: true)
     }
 
@@ -180,6 +196,9 @@ final class DisplayCapture: NSObject, @unchecked Sendable {
         hasAudioOutput = false
         stream = nil
         sender = nil
+        audioQueue.async { [audioFrameBuffer] in
+            audioFrameBuffer.reset()
+        }
     }
 
     /// Non-blocking NDI status poll. Safe to call from a detached task.
@@ -265,7 +284,10 @@ final class DisplayCapture: NSObject, @unchecked Sendable {
             flags: 0,
             blockBufferOut: nil
         )
-        guard status == noErr, requiredSize > 0 else { return }
+        guard status == noErr, requiredSize > 0 else {
+            Self.logger.error("Failed to get audio buffer list: status=\(status) requiredSize=\(requiredSize)")
+            return
+        }
 
         let ablStorage = UnsafeMutableRawPointer.allocate(byteCount: requiredSize, alignment: 16)
         defer { ablStorage.deallocate() }
@@ -288,6 +310,7 @@ final class DisplayCapture: NSObject, @unchecked Sendable {
         guard asbd.mFormatID == kAudioFormatLinearPCM, isFloat, asbd.mBitsPerChannel == 32 else {
             if !warnedAudioFormat {
                 warnedAudioFormat = true
+                Self.logger.error("Dropping audio: unsupported format ID=\(asbd.mFormatID) flags=\(asbd.mFormatFlags) bits=\(asbd.mBitsPerChannel)")
                 NSLog("[DualCast] Dropping audio: unsupported format flags %u bits %u",
                       asbd.mFormatFlags, asbd.mBitsPerChannel)
             }
@@ -300,11 +323,12 @@ final class DisplayCapture: NSObject, @unchecked Sendable {
         let channelCount = max(Int(asbd.mChannelsPerFrame), 1)
         let sampleRate = Int(asbd.mSampleRate)
         let isNonInterleaved = (asbd.mFormatFlags & kAudioFormatFlagIsNonInterleaved) != 0
-        #if DEBUG
         if audioTXCount == 0 {
+            Self.logger.info("Audio format: ch=\(channelCount) rate=\(sampleRate) nonInterleaved=\(isNonInterleaved) ablBuffers=\(abl.count) b0Bytes=\(abl.first?.mDataByteSize ?? 0)")
+            #if DEBUG
             audioDebugLog("ASBD ch=\(channelCount) rate=\(sampleRate) nonInterleaved=\(isNonInterleaved) ablBuffers=\(abl.count) b0Bytes=\(abl.first?.mDataByteSize ?? 0)")
+            #endif
         }
-        #endif
 
         // NDI FLTP requires ONE contiguous planar buffer ([ch0][ch1]...).
         // Build it from whatever SCK delivered (planar or interleaved).
@@ -316,7 +340,10 @@ final class DisplayCapture: NSObject, @unchecked Sendable {
                 Int($0.mDataByteSize) / (MemoryLayout<Float>.size * channelCount)
             } ?? 0
         }
-        guard sampleCount > 0 else { return }
+        guard sampleCount > 0 else {
+            Self.logger.warning("Audio sample buffer has zero samples; skipping")
+            return
+        }
 
         ensureAudioPlanarCapacity(floats: sampleCount * channelCount)
         guard let planar = audioPlanarBuffer else { return }
@@ -345,18 +372,45 @@ final class DisplayCapture: NSObject, @unchecked Sendable {
         }
 
         publishAudioLevel(planar: planar, sampleCount: sampleCount, channelCount: channelCount)
-        sender.send(
-            fltpPlanarData: UnsafePointer(planar),
+
+        // Buffer audio into frame-aligned chunks matching the video cadence.
+        audioFrameBuffer.configure(
             channelCount: channelCount,
             sampleRate: sampleRate,
-            sampleCount: sampleCount
+            framesPerSecond: audioFramesPerSecond
         )
-        #if DEBUG
-        audioTXCount += 1
-        if audioTXCount % 100 == 1 {
-            audioDebugLog("frame #\(audioTXCount) samples=\(sampleCount) ch=\(channelCount) rate=\(sampleRate) peakSent")
+        guard let frame = audioFrameBuffer.append(planar: UnsafePointer(planar), sampleCount: sampleCount) else { return }
+        let frameSampleCount = audioFrameBuffer.frameSampleCount
+
+        // Verify the buffered frame is not silent before sending.
+        var bufferedPeak: Float = 0
+        for channel in 0..<channelCount {
+            var channelPeak: Float = 0
+            vDSP_maxmgv(
+                frame.withUnsafeBufferPointer { $0.baseAddress!.advanced(by: channel * frameSampleCount) },
+                1,
+                &channelPeak,
+                vDSP_Length(frameSampleCount)
+            )
+            bufferedPeak = max(bufferedPeak, channelPeak)
         }
-        #endif
+
+        frame.withUnsafeBufferPointer { frameBuffer in
+            sender.send(
+                fltpPlanarData: frameBuffer.baseAddress!,
+                channelCount: channelCount,
+                sampleRate: sampleRate,
+                sampleCount: frameSampleCount
+            )
+        }
+
+        audioTXCount += 1
+        if audioTXCount % 100 == 1 || bufferedPeak == 0 {
+            Self.logger.debug("Sent audio frame #\(self.audioTXCount) samples=\(frameSampleCount) ch=\(channelCount) rate=\(sampleRate) peak=\(bufferedPeak)")
+            #if DEBUG
+            audioDebugLog("frame #\(audioTXCount) samples=\(frameSampleCount) ch=\(channelCount) rate=\(sampleRate) peak=\(bufferedPeak)")
+            #endif
+        }
     }
 
     private func ensureAudioPlanarCapacity(floats: Int) {
@@ -413,6 +467,60 @@ extension DisplayCapture: SCStreamOutput {
             lastPreviewDate = now
             let callback = onPreview
             Task { @MainActor in callback?(preview) }
+        }
+    }
+}
+
+// MARK: - Audio frame buffer
+
+/// Accumulates planar Float32 samples and emits complete NDI-sized frames.
+/// NDI receivers (especially Ecamm) are happiest when audio arrives in chunks
+/// that match the video frame cadence. SCK delivers arbitrary chunks, so we
+/// buffer them and send one frame worth at a time.
+private final class AudioFrameBuffer: @unchecked Sendable {
+    private var channels: [[Float]] = []
+    private var channelCount: Int = 0
+    private var sampleRate: Int = 0
+    private var framesPerSecond: Int = 30
+
+    var frameSampleCount: Int { max(1, sampleRate / framesPerSecond) }
+
+    func configure(channelCount: Int, sampleRate: Int, framesPerSecond: Int) {
+        guard channelCount > 0, sampleRate > 0, framesPerSecond > 0 else { return }
+        if channelCount != self.channelCount || sampleRate != self.sampleRate || framesPerSecond != self.framesPerSecond {
+            self.channelCount = channelCount
+            self.sampleRate = sampleRate
+            self.framesPerSecond = framesPerSecond
+            channels = Array(repeating: [], count: channelCount)
+        }
+    }
+
+    /// Append planar samples and return one complete frame if available.
+    /// The returned array is [ch0 frame][ch1 frame]... in NDI FLTP order.
+    func append(planar: UnsafePointer<Float>, sampleCount: Int) -> [Float]? {
+        guard sampleCount > 0, channelCount > 0 else { return nil }
+
+        for channel in 0..<channelCount {
+            let source = UnsafeBufferPointer(start: planar.advanced(by: channel * sampleCount), count: sampleCount)
+            channels[channel].append(contentsOf: source)
+        }
+
+        let frameSize = frameSampleCount
+        guard channels.allSatisfy({ $0.count >= frameSize }) else { return nil }
+
+        var frame = [Float]()
+        frame.reserveCapacity(frameSize * channelCount)
+        for channel in 0..<channelCount {
+            frame.append(contentsOf: channels[channel].prefix(frameSize))
+            channels[channel].removeFirst(frameSize)
+        }
+        return frame
+    }
+
+    /// Discard any partial samples (called on stop to avoid stale audio).
+    func reset() {
+        for index in channels.indices {
+            channels[index].removeAll(keepingCapacity: false)
         }
     }
 }

@@ -100,7 +100,7 @@ final class NDIFinder: @unchecked Sendable {
         }
 
         for source in sources {
-            NSLog("[Switcher] found source: %@ url: %@", source.name, source.urlAddress)
+            NSLog("[DualCast] found source: %@ url: %@", source.name, source.urlAddress)
         }
 
         let callback = onSourcesChanged

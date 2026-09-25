@@ -32,6 +32,8 @@ final class RelayEngine: @unchecked Sendable {
     var onSlotStats: (@MainActor (Int, SlotStats) -> Void)?
     var onReceiverStatus: (@MainActor (Int, NDIReceiver.Status) -> Void)?
     var onReceiverStopped: ((Int) -> Void)?
+    /// Called on the capture thread for audio frames from the currently active slot.
+    var onActiveAudioFrame: ((UnsafePointer<NDIlib_audio_frame_v3_t>) -> Void)?
 
     // MARK: State
 
@@ -71,8 +73,11 @@ final class RelayEngine: @unchecked Sendable {
             running = true
         }
 
+        // Audio is forwarded from a remote NDI source, not generated locally;
+        // do not clock it. Free-running audio avoids receivers dropping the
+        // stream when buffer sizes vary.
         let sender = try NDISender(sourceName: outputName, framesPerSecond: 30,
-                                   clockAudio: true)
+                                   clockAudio: false)
         sendLock.lock()
         self.sender = sender
         sendLock.unlock()
@@ -203,16 +208,16 @@ final class RelayEngine: @unchecked Sendable {
     private func forwardAudio(_ frame: UnsafePointer<NDIlib_audio_frame_v3_t>, from slot: Int) {
         statsLock.withLock { lastAudioDate[slot] = Date() }
 
-        // Audio is forwarded regardless of the active video slot: macOS
-        // system audio is global, not per-display, and only the
-        // audio-carrying source produces audio frames — so forwarding every
-        // incoming audio frame yields CONTINUOUS audio across display
-        // switches, which is what a stream wants. (If both inputs ever
-        // carried audio this would need an active-slot guard to avoid
-        // doubling; DualCast enforces a single audio display.)
+        let isActive = stateLock.withLock { activeSlot == slot }
+        guard isActive else { return }
+
+        // Forward active-slot audio to the output NDI sender.
         sendLock.lock()
         sender?.send(audioFrame: frame)
         sendLock.unlock()
+
+        // Also deliver to the virtual audio driver consumer.
+        onActiveAudioFrame?(frame)
     }
 
     private func updateStats(for slot: Int) {

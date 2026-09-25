@@ -26,7 +26,16 @@ final class SwitcherManager {
         didSet {
             UserDefaults.standard.set(slotSourceNames[0], forKey: DefaultsKey.slotA)
             UserDefaults.standard.set(slotSourceNames[1], forKey: DefaultsKey.slotB)
+            syncCameraExtensionAssignments()
         }
+    }
+
+    /// Writes the current slot assignments into the shared App Group so the
+    /// camera extension can discover and receive the matching NDI sources.
+    private func syncCameraExtensionAssignments() {
+        guard let shared = UserDefaults(suiteName: "group.com.woodseedigi.DualCast") else { return }
+        shared.set(slotSourceNames[0], forKey: "dualcast.camera.source.1")
+        shared.set(slotSourceNames[1], forKey: "dualcast.camera.source.2")
     }
 
     var outputName: String {
@@ -55,6 +64,8 @@ final class SwitcherManager {
     private let hotkeys = GlobalHotKey()
     private var engine: RelayEngine?
     private var finderStarted = false
+    private var audioRingBuffer: UnsafeMutablePointer<DualCastAudioRingBuffer>?
+    private var audioConvertBuffer: [Float] = []
     private var statusPollTask: Task<Void, Never>?
     private var reconnectTasks: [Int: Task<Void, Never>] = [:]
     /// Set by bootstrap when both slots are assigned: keeps retrying start()
@@ -72,6 +83,7 @@ final class SwitcherManager {
             defaults.string(forKey: DefaultsKey.slotB) ?? ""
         ]
         outputName = defaults.string(forKey: DefaultsKey.outputName) ?? "DualCast Active Display"
+        syncCameraExtensionAssignments()
         registerHotkeys()
     }
 
@@ -130,6 +142,7 @@ final class SwitcherManager {
         do {
             try engine.start(outputName: outputName, slots: slots)
             self.engine = engine
+            openAudioRingBuffer()
             isRunning = true
             autoStartWanted = false
             errorMessage = nil
@@ -150,6 +163,7 @@ final class SwitcherManager {
             await engine.stop()
         }
         engine = nil
+        closeAudioRingBuffer()
         isRunning = false
         outputReceivers = 0
         outputOnProgram = false
@@ -182,12 +196,84 @@ final class SwitcherManager {
         engine.onReceiverStatus = { [weak self] slot, status in
             self?.handleReceiverStatus(slot: slot, status: status)
         }
+        engine.onActiveAudioFrame = { [weak self] frame in
+            self?.handleActiveAudioFrame(frame)
+        }
     }
 
     private func handleReceiverStatus(slot: Int, status: NDIReceiver.Status) {
         slotStatuses[slot] = status
         guard isRunning, case .failed = status else { return }
         scheduleReconnect(for: slot)
+    }
+
+    // MARK: - Virtual audio driver ring buffer
+
+    private func openAudioRingBuffer() {
+        guard audioRingBuffer == nil else { return }
+        audioRingBuffer = DualCastAudioRingBufferOpen(true)
+        if audioRingBuffer == nil {
+            NSLog("[Switcher] Failed to open audio ring buffer")
+        } else {
+            NSLog("[Switcher] Audio ring buffer opened")
+        }
+    }
+
+    private func closeAudioRingBuffer() {
+        guard let buffer = audioRingBuffer else { return }
+        DualCastAudioRingBufferClose(buffer, true)
+        audioRingBuffer = nil
+        audioConvertBuffer.removeAll()
+        NSLog("[Switcher] Audio ring buffer closed")
+    }
+
+    private func handleActiveAudioFrame(_ frame: UnsafePointer<NDIlib_audio_frame_v3_t>) {
+        guard let ringBuffer = audioRingBuffer else { return }
+
+        let sampleRate = Int(frame.pointee.sample_rate)
+        let channels = Int(frame.pointee.no_channels)
+        let samples = Int(frame.pointee.no_samples)
+        let fourCC = frame.pointee.FourCC
+
+        // 'FLTP' FourCC used by NDI for planar 32-bit float audio.
+        let fourCC_FLTP = UInt32(Character("F").asciiValue!) |
+                          (UInt32(Character("L").asciiValue!) << 8) |
+                          (UInt32(Character("T").asciiValue!) << 16) |
+                          (UInt32(Character("P").asciiValue!) << 24)
+
+        guard sampleRate == DUALCAST_AUDIO_SAMPLE_RATE,
+              channels == DUALCAST_AUDIO_CHANNELS,
+              samples > 0,
+              fourCC == fourCC_FLTP else {
+            return
+        }
+
+        let needed = samples * channels
+        if audioConvertBuffer.count < needed {
+            audioConvertBuffer = [Float](repeating: 0, count: needed)
+        }
+
+        // NDI FLTP is planar: all channels in one buffer, separated by channel_stride_in_bytes.
+        guard let base = frame.pointee.p_data else { return }
+        let stride = Int(frame.pointee.channel_stride_in_bytes)
+        var channelPointers: [UnsafePointer<Float>] = []
+        for ch in 0..<channels {
+            let channelBase = base.advanced(by: ch * stride)
+            channelBase.withMemoryRebound(to: Float.self, capacity: samples) { ptr in
+                channelPointers.append(ptr)
+            }
+        }
+
+        for i in 0..<samples {
+            for ch in 0..<channels {
+                audioConvertBuffer[i * channels + ch] = channelPointers[ch][i]
+            }
+        }
+
+        audioConvertBuffer.withUnsafeBufferPointer { buffer in
+            guard let baseAddress = buffer.baseAddress else { return }
+            _ = DualCastAudioRingBufferWrite(ringBuffer, baseAddress, UInt32(samples))
+        }
     }
 
     // MARK: - Reconnect

@@ -1,0 +1,18 @@
+#!/bin/zsh
+#
+# postinstall
+#
+# Runs after the pkg installs DualCast apps and the audio driver.
+# Restarts coreaudiod so the DualCast Audio device appears immediately.
+#
+
+set -e
+
+HAL_DIR="/Library/Audio/Plug-Ins/HAL"
+
+if [[ -d "$HAL_DIR/DualCastAudioDriver.driver" ]]; then
+    echo "Restarting coreaudiod to load DualCast Audio..."
+    killall coreaudiod 2>/dev/null || true
+fi
+
+exit 0

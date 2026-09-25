@@ -53,13 +53,18 @@ targets:
         NSPrincipalClass: NSApplication
         LSMinimumSystemVersion: "14.0"
         NSHumanReadableCopyright: "woodsee"
+        NSCameraUsageDescription: "DualCast publishes your cameras as NDI sources on the local network."
+        NSMicrophoneUsageDescription: "DualCast captures system audio and attaches it to the selected display stream."
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.woodseedigi.DualCast
         PRODUCT_NAME: DualCast
+        DEVELOPMENT_TEAM: 3BMZ2ULZ54
         CODE_SIGN_ENTITLEMENTS: "$(SRCROOT)/Resources/DualCast.entitlements"
         SWIFT_OBJC_BRIDGING_HEADER: "$(SRCROOT)/Vendor/NDI/DualCast-Bridging-Header.h"
-        HEADER_SEARCH_PATHS: "$(SRCROOT)/Vendor/NDI/include"
+        HEADER_SEARCH_PATHS:
+          - "$(SRCROOT)/Vendor/NDI/include"
+          - "$(SRCROOT)/Sources/Shared"
         LIBRARY_SEARCH_PATHS:
           - "$(inherited)"
           - "$(SRCROOT)/Vendor/NDI"
@@ -71,12 +76,55 @@ targets:
         embed: true
         codeSign: true
 
+  DualCastCameraExtension:
+    type: extensionkit-extension
+    platform: macOS
+    sources:
+      - path: Sources/CameraExtension
+      - path: Sources/Shared
+      - path: Vendor
+        buildPhase: none
+    info:
+      path: Resources/CameraExtensionInfo.plist
+      properties:
+        CFBundleName: DualCast Virtual Camera
+        CFBundleDisplayName: DualCast Virtual Camera
+        CFBundlePackageType: XPC!
+        LSMinimumSystemVersion: "14.0"
+        NSHumanReadableCopyright: "woodsee"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.cmio.DPA.camera
+          NSExtensionPrincipalClass: DualCastCameraExtension.CameraExtensionProvider
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.woodseedigi.DualCastSwitcher.CameraExtension
+        PRODUCT_NAME: DualCastCameraExtension
+        DEVELOPMENT_TEAM: 3BMZ2ULZ54
+        CODE_SIGN_ENTITLEMENTS: "$(SRCROOT)/Resources/CameraExtension.entitlements"
+        SWIFT_OBJC_BRIDGING_HEADER: "$(SRCROOT)/Vendor/NDI/DualCast-Bridging-Header.h"
+        HEADER_SEARCH_PATHS:
+          - "$(SRCROOT)/Vendor/NDI/include"
+          - "$(SRCROOT)/Sources/Shared"
+        LIBRARY_SEARCH_PATHS:
+          - "$(inherited)"
+          - "$(SRCROOT)/Vendor/NDI"
+        LD_RUNPATH_SEARCH_PATHS:
+          - "$(inherited)"
+          - "@executable_path"
+          - "@executable_path/../../../../Frameworks"
+    dependencies:
+      - sdk: CoreMediaIO.framework
+      - framework: Vendor/NDI/libndi.dylib
+        embed: true
+        codeSign: true
+
   DualCastSwitcher:
     type: application
     platform: macOS
     sources:
       - path: Sources/Switcher
       - path: Sources/Shared
+      - path: scripts/install-audio-driver.sh
       - path: Vendor
         buildPhase: none
     info:
@@ -94,9 +142,12 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.woodseedigi.DualCastSwitcher
         PRODUCT_NAME: DualCastSwitcher
-        CODE_SIGN_ENTITLEMENTS: "$(SRCROOT)/Resources/DualCast.entitlements"
+        DEVELOPMENT_TEAM: 3BMZ2ULZ54
+        CODE_SIGN_ENTITLEMENTS: "$(SRCROOT)/Resources/Switcher.entitlements"
         SWIFT_OBJC_BRIDGING_HEADER: "$(SRCROOT)/Vendor/NDI/DualCast-Bridging-Header.h"
-        HEADER_SEARCH_PATHS: "$(SRCROOT)/Vendor/NDI/include"
+        HEADER_SEARCH_PATHS:
+          - "$(SRCROOT)/Vendor/NDI/include"
+          - "$(SRCROOT)/Sources/Shared"
         LIBRARY_SEARCH_PATHS:
           - "$(inherited)"
           - "$(SRCROOT)/Vendor/NDI"
@@ -107,3 +158,42 @@ targets:
       - framework: Vendor/NDI/libndi.dylib
         embed: true
         codeSign: true
+      - target: DualCastCameraExtension
+        embed: true
+      - target: DualCastAudioDriver
+        embed: false
+      - sdk: SystemExtensions.framework
+
+  DualCastAudioDriver:
+    type: bundle
+    platform: macOS
+    sources:
+      - path: Sources/AudioDriver
+      - path: Sources/Shared/DualCastAudioRingBuffer.c
+    info:
+      path: Resources/AudioDriverInfo.plist
+      properties:
+        CFBundleName: DualCast Audio
+        CFBundleDisplayName: DualCast Audio
+        CFBundlePackageType: BNDL
+        LSMinimumSystemVersion: "14.0"
+        NSHumanReadableCopyright: "woodsee"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.woodseedigi.DualCastSwitcher.AudioDriver
+        PRODUCT_NAME: DualCastAudioDriver
+        DEVELOPMENT_TEAM: 3BMZ2ULZ54
+        WRAPPER_EXTENSION: driver
+        MACH_O_TYPE: mh_bundle
+        INFOPLIST_FILE: "$(SRCROOT)/Resources/AudioDriverInfo.plist"
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_ENTITLEMENTS: "$(SRCROOT)/Resources/AudioDriver.entitlements"
+        HEADER_SEARCH_PATHS:
+          - "$(SRCROOT)/Sources/AudioDriver"
+          - "$(SRCROOT)/Sources/Shared"
+        CLANG_MODULES_AUTOLINK: NO
+        OTHER_LDFLAGS:
+          - "-Wl,-exported_symbol,_AudioServerPlugInFactory"
+    dependencies:
+      - sdk: CoreAudio.framework
+      - sdk: CoreFoundation.framework

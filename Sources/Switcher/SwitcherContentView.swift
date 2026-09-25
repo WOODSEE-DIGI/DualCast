@@ -10,10 +10,14 @@ import SwiftUI
 
 struct SwitcherContentView: View {
     @Environment(SwitcherManager.self) private var manager
+    @StateObject private var cameraManager = CameraExtensionManager.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             header
+
+            virtualCameraBanner
+            virtualAudioBanner
 
             if !manager.ndiAvailable {
                 Label("NDI library unavailable.", systemImage: "exclamationmark.triangle")
@@ -52,6 +56,59 @@ struct SwitcherContentView: View {
         }
         .padding(18)
         .frame(minWidth: 720)
+    }
+
+    private var virtualCameraBanner: some View {
+        HStack {
+            Image(systemName: "video.fill")
+                .foregroundStyle(.blue)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Virtual Cameras")
+                    .font(.callout.weight(.semibold))
+                Text("Exposes Slot A and Slot B to Ecamm as separate webcams")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            VStack(alignment: .trailing, spacing: 2) {
+                Button(cameraManager.activationState == .activated ? "Activated" : "Activate Cameras") {
+                    cameraManager.activate()
+                }
+                .disabled(cameraManager.activationState == .activated || cameraManager.activationState == .activating)
+                if let error = cameraManager.lastError {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .lineLimit(2)
+                        .frame(maxWidth: 280, alignment: .trailing)
+                }
+            }
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .controlBackgroundColor)))
+    }
+
+    private var virtualAudioBanner: some View {
+        HStack {
+            Image(systemName: "speaker.wave.2.fill")
+                .foregroundStyle(.green)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Virtual Audio")
+                    .font(.callout.weight(.semibold))
+                Text("Routes the active slot's NDI audio to a system audio device")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("Copy Install Command") {
+                let command = "cd /path/to/DualCast && sudo ./scripts/install-audio-driver.sh"
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(command, forType: .string)
+            }
+            .help("Copies the command to install the audio driver")
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .controlBackgroundColor)))
     }
 
     private var header: some View {

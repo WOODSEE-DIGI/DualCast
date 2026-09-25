@@ -7,5 +7,6 @@
 #define DualCast_Bridging_Header_h
 
 #import "NDILib.h"
+#import "DualCastAudioRingBuffer.h"
 
 #endif /* DualCast_Bridging_Header_h */
