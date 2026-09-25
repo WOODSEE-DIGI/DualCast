@@ -27,7 +27,7 @@
 		<key>NSExtensionPointIdentifier</key>
 		<string>com.apple.cmio.DPA.camera</string>
 		<key>NSExtensionPrincipalClass</key>
-		<string>DualCastCameraExtension.CameraExtensionProvider</string>
+		<string>DualCastCameraExtension.CameraExtensionProviderSource</string>
 	</dict>
 	<key>NSHumanReadableCopyright</key>
 	<string>woodsee</string>

@@ -94,7 +94,7 @@ targets:
         NSHumanReadableCopyright: "woodsee"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.cmio.DPA.camera
-          NSExtensionPrincipalClass: DualCastCameraExtension.CameraExtensionProvider
+          NSExtensionPrincipalClass: DualCastCameraExtension.CameraExtensionProviderSource
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.woodseedigi.DualCastSwitcher.CameraExtension
