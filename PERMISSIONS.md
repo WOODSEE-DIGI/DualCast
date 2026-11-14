@@ -15,8 +15,8 @@ driver to work.
 
 ## Apple Developer capabilities (must be enabled in the developer portal)
 
-These are tied to the team ID `3BMZ2ULZ54` and bundle IDs already set in
-`project.yml`.
+These are tied to your Apple Developer team ID and the bundle IDs already set
+in `project.yml`.
 
 | Capability | Required by | Bundle ID |
 |------------|-------------|-----------|
@@ -28,9 +28,10 @@ sign but the camera extension activation will fail at runtime.
 
 ## Code signing
 
-Automatic signing is configured with team ID `3BMZ2ULZ54` in `project.yml`.
-To build on a different Mac, that Mac must have a valid Apple Development
-certificate for that team in Keychain Access.
+Automatic signing is configured in `project.yml` by setting
+`DEVELOPMENT_TEAM` to your Apple Developer team ID. To build on a different
+Mac, that Mac must have a valid Apple Development certificate for that team in
+Keychain Access.
 
 ## Audio driver installation
 

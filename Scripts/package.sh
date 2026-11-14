@@ -14,8 +14,8 @@
 # to attempt a Release build (will fail unless profiles are configured in the
 # Apple Developer portal).
 #
-# Must be run on a Mac with the Apple Development certificate for team
-# 3BMZ2ULZ54 in the keychain.
+# Must be run on a Mac with the Apple Development certificate for your Apple
+# Developer team in the keychain.
 #
 
 set -e

@@ -22,7 +22,7 @@ settings:
     SWIFT_STRICT_CONCURRENCY: complete
     ENABLE_HARDENED_RUNTIME: YES
     CODE_SIGN_STYLE: Automatic
-    DEVELOPMENT_TEAM: 3BMZ2ULZ54
+    DEVELOPMENT_TEAM: ""
     MARKETING_VERSION: "0.4.0"
     CURRENT_PROJECT_VERSION: "4"
   configs:
@@ -59,7 +59,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.woodseedigi.DualCast
         PRODUCT_NAME: DualCast
-        DEVELOPMENT_TEAM: 3BMZ2ULZ54
+        DEVELOPMENT_TEAM: ""
         CODE_SIGN_ENTITLEMENTS: "$(SRCROOT)/Resources/DualCast.entitlements"
         SWIFT_OBJC_BRIDGING_HEADER: "$(SRCROOT)/Vendor/NDI/DualCast-Bridging-Header.h"
         HEADER_SEARCH_PATHS:
@@ -99,7 +99,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.woodseedigi.DualCastSwitcher.CameraExtension
         PRODUCT_NAME: DualCastCameraExtension
-        DEVELOPMENT_TEAM: 3BMZ2ULZ54
+        DEVELOPMENT_TEAM: ""
         CODE_SIGN_ENTITLEMENTS: "$(SRCROOT)/Resources/CameraExtension.entitlements"
         SWIFT_OBJC_BRIDGING_HEADER: "$(SRCROOT)/Vendor/NDI/DualCast-Bridging-Header.h"
         HEADER_SEARCH_PATHS:
@@ -142,7 +142,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.woodseedigi.DualCastSwitcher
         PRODUCT_NAME: DualCastSwitcher
-        DEVELOPMENT_TEAM: 3BMZ2ULZ54
+        DEVELOPMENT_TEAM: ""
         CODE_SIGN_ENTITLEMENTS: "$(SRCROOT)/Resources/Switcher.entitlements"
         SWIFT_OBJC_BRIDGING_HEADER: "$(SRCROOT)/Vendor/NDI/DualCast-Bridging-Header.h"
         HEADER_SEARCH_PATHS:
@@ -185,7 +185,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.woodseedigi.DualCastSwitcher.AudioDriver
         PRODUCT_NAME: DualCastAudioDriver
-        DEVELOPMENT_TEAM: 3BMZ2ULZ54
+        DEVELOPMENT_TEAM: ""
         WRAPPER_EXTENSION: driver
         MACH_O_TYPE: mh_bundle
         INFOPLIST_FILE: "$(SRCROOT)/Resources/AudioDriverInfo.plist"
