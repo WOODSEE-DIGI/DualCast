@@ -2,101 +2,63 @@
 //  ContentView.swift
 //  DualCast
 //
-//  Main control surface: one row per display with enable toggle, editable NDI
-//  source name, live preview, throughput stats, receiver count, and
-//  LIVE/PREVIEW tally badges.
+//  Main control surface with two tabs: Displays and Cameras. Each input type
+//  gets its own page so the window stays usable even with many displays and
+//  cameras attached.
 //
 
 import SwiftUI
 
+enum InputTab: String, CaseIterable, Identifiable {
+    case displays = "Displays"
+    case cameras = "Cameras"
+
+    var id: String { rawValue }
+    var icon: String {
+        switch self {
+        case .displays: return "display.2"
+        case .cameras: return "camera.fill"
+        }
+    }
+}
+
 struct ContentView: View {
     @Environment(StreamManager.self) private var manager
+    @State private var selectedTab: InputTab = .displays
 
     var body: some View {
-        @Bindable var manager = manager
-
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(spacing: 0) {
             header
+                .padding(.horizontal, 20)
+                .padding(.top, 20)
 
-            if !manager.ndiAvailable {
-                banner(
-                    text: "NDI library unavailable. Install with: brew install --cask libndi",
-                    color: .red
-                )
-            } else if !manager.permissionGranted {
-                permissionBanner
-            } else if !manager.cameraPermissionGranted {
-                cameraPermissionBanner
-            }
-
-            if let error = manager.globalError, manager.ndiAvailable, manager.permissionGranted {
-                banner(text: error, color: .orange)
-            }
-
-            SectionHeader(title: "Displays", icon: "display.2")
-
-            ForEach($manager.displays) { $display in
-                DisplayRowView(
-                    display: $display,
-                    preview: manager.previews[display.id],
-                    carriesAudio: manager.audioDisplayID == display.id,
-                    audioLevel: manager.audioLevels[display.id] ?? 0,
-                    onToggleAudio: {
-                        Task { await manager.setAudioDisplay(display.id) }
-                    }
-                ) {
-                    Task {
-                        if display.isStreaming {
-                            await manager.stop(id: display.id)
-                        } else {
-                            await manager.start(id: display.id)
-                        }
-                    }
+            Picker("View", selection: $selectedTab) {
+                ForEach(InputTab.allCases) { tab in
+                    Label(tab.rawValue, systemImage: tab.icon).tag(tab)
                 }
             }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
 
-            if manager.displays.isEmpty, manager.permissionGranted, manager.ndiAvailable {
-                ContentUnavailableView(
-                    "No Displays Found",
-                    systemImage: "display.2",
-                    description: Text("Grant screen recording permission, then refresh.")
-                )
-            }
+            Divider()
 
-            SectionHeader(title: "Cameras", icon: "camera.fill")
-
-            ForEach($manager.cameras) { $camera in
-                CameraRowView(
-                    camera: $camera,
-                    preview: manager.cameraPreviews[camera.id]
-                ) {
-                    Task {
-                        if camera.isStreaming {
-                            await manager.stopCamera(id: camera.id)
-                        } else {
-                            await manager.startCamera(id: camera.id)
-                        }
-                    }
-                }
-            }
-
-            if manager.cameras.isEmpty, manager.cameraPermissionGranted {
-                ContentUnavailableView(
-                    "No Cameras Found",
-                    systemImage: "camera",
-                    description: Text("Connect a webcam or ensure FaceTime camera is available.")
-                )
+            switch selectedTab {
+            case .displays:
+                DisplaysListView()
+            case .cameras:
+                CamerasListView()
             }
 
             Divider()
-            controls
-            footer
+            controlsFooter
+                .padding(.horizontal, 20)
+                .padding(.bottom, 12)
         }
-        .padding(20)
-        .frame(minWidth: 620)
+        .frame(minWidth: 760, minHeight: 600)
     }
 
-    // MARK: - Sections
+    // MARK: - Header
 
     private var header: some View {
         HStack {
@@ -116,47 +78,165 @@ struct ContentView: View {
         }
     }
 
-    private var permissionBanner: some View {
-        HStack {
-            Label("Screen recording permission required", systemImage: "exclamationmark.shield")
-                .foregroundStyle(.white)
-            Spacer()
-            Button("Grant Access…") {
-                Task { await manager.requestPermission() }
-            }
-            Button("Open Settings") {
-                if let url = URL(
-                    string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
-                ) {
-                    NSWorkspace.shared.open(url)
+    // MARK: - Footer + controls
+
+    private var controlsFooter: some View {
+        VStack(spacing: 12) {
+            HStack {
+                Button("Start All") {
+                    Task { await manager.startAll() }
+                }
+                .controlSize(.large)
+                .disabled(!manager.permissionGranted || !manager.ndiAvailable)
+
+                Button("Stop All") {
+                    Task { await manager.stopAll() }
+                }
+                .controlSize(.large)
+                .disabled(!manager.isAnyStreaming)
+
+                Spacer()
+
+                Button {
+                    Task { await manager.refresh() }
+                } label: {
+                    Label("Refresh", systemImage: "arrow.clockwise")
                 }
             }
-        }
-        .padding(10)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color.orange))
-    }
 
-    private var cameraPermissionBanner: some View {
-        HStack {
-            Label("Camera access required", systemImage: "exclamationmark.shield")
-                .foregroundStyle(.white)
-            Spacer()
-            Button("Grant Access…") {
-                Task { await manager.requestCameraPermission() }
+            HStack {
+                Text("NDI \(manager.ndiVersion)")
+                Text("·")
+                Text("Receivers see sources as “\(ProcessInfo.processInfo.hostName) (name)”")
+                Spacer()
+                Text("1440p30 per display")
+                    .foregroundStyle(.secondary)
             }
-            Button("Open Settings") {
-                if let url = URL(
-                    string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera"
-                ) {
-                    NSWorkspace.shared.open(url)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+    }
+}
+
+// MARK: - Displays tab
+
+private struct DisplaysListView: View {
+    @Environment(StreamManager.self) private var manager
+
+    var body: some View {
+        @Bindable var manager = manager
+
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                StatusBanners(showCameraPermission: false)
+
+                SectionHeader(title: "Displays", icon: "display.2")
+
+                ForEach($manager.displays) { $display in
+                    DisplayRowView(
+                        display: $display,
+                        preview: manager.previews[display.id],
+                        carriesAudio: manager.audioDisplayID == display.id,
+                        audioLevel: manager.audioLevels[display.id] ?? 0,
+                        onToggleAudio: {
+                            Task { await manager.setAudioDisplay(display.id) }
+                        }
+                    ) {
+                        Task {
+                            if display.isStreaming {
+                                await manager.stop(id: display.id)
+                            } else {
+                                await manager.start(id: display.id)
+                            }
+                        }
+                    }
+                }
+
+                if manager.displays.isEmpty, manager.permissionGranted, manager.ndiAvailable {
+                    ContentUnavailableView(
+                        "No Displays Found",
+                        systemImage: "display.2",
+                        description: Text("Grant screen recording permission, then refresh.")
+                    )
                 }
             }
+            .padding(20)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(10)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color.orange))
     }
+}
 
-    private func banner(text: String, color: Color) -> some View {
+// MARK: - Cameras tab
+
+private struct CamerasListView: View {
+    @Environment(StreamManager.self) private var manager
+
+    var body: some View {
+        @Bindable var manager = manager
+
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                StatusBanners(showCameraPermission: true)
+
+                SectionHeader(title: "Cameras", icon: "camera.fill")
+
+                ForEach($manager.cameras) { $camera in
+                    CameraRowView(
+                        camera: $camera,
+                        preview: manager.cameraPreviews[camera.id]
+                    ) {
+                        Task {
+                            if camera.isStreaming {
+                                await manager.stopCamera(id: camera.id)
+                            } else {
+                                await manager.startCamera(id: camera.id)
+                            }
+                        }
+                    }
+                }
+
+                if manager.cameras.isEmpty, manager.cameraPermissionGranted {
+                    ContentUnavailableView(
+                        "No Cameras Found",
+                        systemImage: "camera",
+                        description: Text("Connect a webcam or ensure FaceTime camera is available.")
+                    )
+                }
+            }
+            .padding(20)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+// MARK: - Status banners
+
+private struct StatusBanners: View {
+    @Environment(StreamManager.self) private var manager
+    let showCameraPermission: Bool
+
+    var body: some View {
+        VStack(spacing: 12) {
+            if !manager.ndiAvailable {
+                Banner(text: "NDI library unavailable. Install with: brew install --cask libndi", color: .red)
+            } else if !manager.permissionGranted {
+                PermissionBanner(camera: false)
+            } else if showCameraPermission, !manager.cameraPermissionGranted {
+                PermissionBanner(camera: true)
+            }
+
+            if let error = manager.globalError, manager.ndiAvailable, manager.permissionGranted {
+                Banner(text: error, color: .orange)
+            }
+        }
+    }
+}
+
+private struct Banner: View {
+    let text: String
+    let color: Color
+
+    var body: some View {
         Label(text, systemImage: "exclamationmark.triangle")
             .font(.callout)
             .foregroundStyle(.white)
@@ -164,42 +244,58 @@ struct ContentView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(RoundedRectangle(cornerRadius: 8).fill(color))
     }
+}
 
-    private var controls: some View {
+private struct PermissionBanner: View {
+    @Environment(StreamManager.self) private var manager
+    let camera: Bool
+
+    var body: some View {
         HStack {
-            Button("Start All") {
-                Task { await manager.startAll() }
-            }
-            .controlSize(.large)
-            .disabled(!manager.permissionGranted || !manager.ndiAvailable)
-
-            Button("Stop All") {
-                Task { await manager.stopAll() }
-            }
-            .controlSize(.large)
-            .disabled(!manager.isAnyStreaming)
-
+            Label(
+                camera ? "Camera access required" : "Screen recording permission required",
+                systemImage: "exclamationmark.shield"
+            )
+            .foregroundStyle(.white)
             Spacer()
-
-            Button {
-                Task { await manager.refresh() }
-            } label: {
-                Label("Refresh", systemImage: "arrow.clockwise")
+            Button("Grant Access…") {
+                Task {
+                    if camera {
+                        await manager.requestCameraPermission()
+                    } else {
+                        await manager.requestPermission()
+                    }
+                }
+            }
+            Button("Open Settings") {
+                if let url = URL(
+                    string: camera
+                        ? "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera"
+                        : "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
+                ) {
+                    NSWorkspace.shared.open(url)
+                }
             }
         }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.orange))
     }
+}
 
-    private var footer: some View {
-        HStack {
-            Text("NDI \(manager.ndiVersion)")
-            Text("·")
-            Text("Receivers see sources as “\(ProcessInfo.processInfo.hostName) (name)”")
-            Spacer()
-            Text("1440p30 per display")
+// MARK: - Section header
+
+private struct SectionHeader: View {
+    let title: String
+    let icon: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon)
                 .foregroundStyle(.secondary)
+            Text(title)
+                .font(.headline)
+            Spacer()
         }
-        .font(.caption)
-        .foregroundStyle(.secondary)
     }
 }
 
@@ -344,23 +440,6 @@ private struct DisplayRowView: View {
             .padding(.vertical, 2)
             .background(Capsule().fill(color))
             .foregroundStyle(.white)
-    }
-}
-
-// MARK: - Section header
-
-private struct SectionHeader: View {
-    let title: String
-    let icon: String
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: icon)
-                .foregroundStyle(.secondary)
-            Text(title)
-                .font(.headline)
-            Spacer()
-        }
     }
 }
 
