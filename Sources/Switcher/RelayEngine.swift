@@ -41,6 +41,8 @@ final class RelayEngine: @unchecked Sendable {
     private var receivers: [Int: NDIReceiver] = [:]
     private var activeSlot = 0
     private var running = false
+    private let syphonOutput = SyphonOutput()
+    private var syphonEnabled = false
 
     /// Serialises all sends to the single output NDI instance.
     private let sendLock = NSLock()
@@ -104,6 +106,7 @@ final class RelayEngine: @unchecked Sendable {
         sendLock.withLock {
             sender = nil
         }
+        syphonOutput.stop()
     }
 
     var isRunning: Bool {
@@ -169,6 +172,26 @@ final class RelayEngine: @unchecked Sendable {
         stateLock.withLock { activeSlot }
     }
 
+    // MARK: - Syphon output
+
+    /// Enables or disables the local Syphon server.
+    func setSyphonEnabled(_ enabled: Bool) {
+        stateLock.withLock { syphonEnabled = enabled }
+        if enabled {
+            syphonOutput.start()
+        } else {
+            syphonOutput.stop()
+        }
+    }
+
+    var isSyphonEnabled: Bool {
+        stateLock.withLock { syphonEnabled }
+    }
+
+    var syphonHasClients: Bool {
+        syphonOutput.hasClients
+    }
+
     // MARK: - Output status (non-blocking)
 
     var outputConnectionCount: Int {
@@ -203,6 +226,10 @@ final class RelayEngine: @unchecked Sendable {
         sendLock.lock()
         sender?.send(videoFrame: frame)
         sendLock.unlock()
+
+        if stateLock.withLock({ syphonEnabled }) {
+            syphonOutput.publish(frame)
+        }
     }
 
     private func forwardAudio(_ frame: UnsafePointer<NDIlib_audio_frame_v3_t>, from slot: Int) {

@@ -17,6 +17,7 @@ struct SwitcherContentView: View {
             header
 
             virtualCameraBanner
+            syphonBanner
             virtualAudioBanner
 
             if !manager.ndiAvailable {
@@ -82,6 +83,30 @@ struct SwitcherContentView: View {
                         .lineLimit(2)
                         .frame(maxWidth: 280, alignment: .trailing)
                 }
+            }
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .controlBackgroundColor)))
+    }
+
+    private var syphonBanner: some View {
+        HStack {
+            Image(systemName: "rectangle.on.rectangle")
+                .foregroundStyle(.purple)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Syphon Output")
+                    .font(.callout.weight(.semibold))
+                Text(manager.syphonEnabled
+                     ? (manager.syphonHasClients > 0
+                        ? "Active — \(manager.syphonHasClients) client\(manager.syphonHasClients == 1 ? "" : "s") connected"
+                        : "Active — waiting for clients")
+                     : "Publish the active slot to Syphon-compatible apps")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button(manager.syphonEnabled ? "Stop" : "Start") {
+                manager.toggleSyphon()
             }
         }
         .padding(10)

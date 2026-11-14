@@ -56,6 +56,8 @@ final class SwitcherManager {
     private(set) var slotAudioAlive: [Int: Bool] = [:]
     private(set) var ndiAvailable = false
     private(set) var ndiVersion = ""
+    private(set) var syphonEnabled = false
+    private(set) var syphonHasClients = 0
     var errorMessage: String?
 
     // MARK: - Internals
@@ -179,6 +181,25 @@ final class SwitcherManager {
 
     func toggleSlot() {
         engine?.toggleSlot()
+    }
+
+    func toggleSyphon() {
+        syphonEnabled.toggle()
+        engine?.setSyphonEnabled(syphonEnabled)
+        if syphonEnabled {
+            startSyphonStatusPolling()
+        } else {
+            syphonHasClients = 0
+        }
+    }
+
+    private func startSyphonStatusPolling() {
+        Task { [weak self] in
+            while let self, self.syphonEnabled, let engine = self.engine {
+                self.syphonHasClients = engine.syphonHasClients ? 1 : 0
+                try? await Task.sleep(for: .seconds(2))
+            }
+        }
     }
 
     // MARK: - Engine callbacks

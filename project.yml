@@ -158,6 +158,9 @@ targets:
       - framework: Vendor/NDI/libndi.dylib
         embed: true
         codeSign: true
+      - framework: Vendor/Syphon/Syphon.framework
+        embed: true
+        codeSign: true
       - target: DualCastCameraExtension
         embed: true
       - target: DualCastAudioDriver
